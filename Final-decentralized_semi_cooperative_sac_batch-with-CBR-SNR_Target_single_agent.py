@@ -1127,12 +1127,19 @@ class UltraExplorativeDecentralizedRLServer:
         self.shared_agent = UltraExplorativeSingleAgent(self.shared_feature_extractor)
         
         # Load models if available
-        if training_mode:
-            SharedModelManager.load_latest_models(
+        if not training_mode:  # Production mode - load trained models
+            log_message("PRODUCTION MODE: Attempting to load latest trained model...")
+            success = SharedModelManager.load_latest_models(
                 self.shared_feature_extractor,
                 self.shared_agent
             )
-        
+            if success:
+                log_message("SUCCESS: Production mode loaded pre-trained models!")
+            else:
+                log_message("WARNING: No trained models found for production mode!", "WARNING")
+                log_message("Starting with randomly initialized networks", "WARNING")
+        else:  # Training mode - start fresh
+            log_message("TRAINING MODE: Starting with fresh neural networks")
         log_message(f"  ULTRA-EXPLORATIVE SINGLE AGENT Server listening on {self.host}:{self.port}")
         log_message(f"Starting in {'TRAINING' if training_mode else 'PRODUCTION'} mode")
         log_message(f"  Exploration settings:")
