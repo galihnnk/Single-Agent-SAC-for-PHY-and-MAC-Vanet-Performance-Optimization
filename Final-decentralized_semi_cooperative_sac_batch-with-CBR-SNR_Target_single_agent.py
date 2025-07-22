@@ -1244,7 +1244,7 @@ class UltraExplorativeDecentralizedRLServer:
                 # Get current state
                 state = [
                     float(vehicle_data.get('CBR', 0)),
-                    float(vehicle_data.get('SNR', 0)),
+                    float(vehicle_data.get('SINR', 0)),
                     float(vehicle_data.get('neighbors', 0))
                 ]
                 
@@ -1255,8 +1255,8 @@ class UltraExplorativeDecentralizedRLServer:
                     'MCS': int(vehicle_data.get('MCS', 0))
                 }
                 
-                logger.info(f"🧠 RL STATE PROCESSING:")
-                logger.info(f"   Processed State: [CBR={state[0]:.6f}, SNR={state[1]:.3f}, Neighbors={state[2]}]")
+                logger.info(f" RL STATE PROCESSING:")
+                logger.info(f"  State: CBR={state[0]:.3f}, SINR={state[1]:.1f}dB, Neighbors={int(state[2])}")
                 
                 # Initialize vehicle if new with ULTRA-EXPLORATIVE agent
                 if vehicle_id not in self.vehicle_nodes:
