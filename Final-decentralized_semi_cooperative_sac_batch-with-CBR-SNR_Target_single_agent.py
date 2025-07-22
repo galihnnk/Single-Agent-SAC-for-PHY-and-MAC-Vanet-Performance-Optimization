@@ -588,7 +588,7 @@ class UltraExplorativeSingleAgent:
                 actions[0, 1] = torch.FloatTensor(1).uniform_(-BEACON_ACTION_BOUND, BEACON_ACTION_BOUND)
                 actions[0, 2] = torch.FloatTensor(1).uniform_(-MCS_ACTION_BOUND, MCS_ACTION_BOUND)
                 
-                logger.info(f"🎲 RANDOM EXPLORATION ACTIVATED: {actions.flatten().tolist()}")
+                logger.info(f"  RANDOM EXPLORATION ACTIVATED: {actions.flatten().tolist()}")
             
             # Update exploration parameters
             self.exploration_factor *= self.exploration_decay
@@ -699,26 +699,26 @@ class UltraExplorativeVehicleNode:
     def get_actions(self, state, current_params):
         """Get actions with dual agent consistency improvements"""
         try:
-            logger.info(f"🎯 STARTING ACTION SELECTION FOR {self.node_id}")
-            logger.info(f"📊 Input State: CBR={state[0]:.6f}, SINR={state[1]:.3f}, Neighbors={state[2]}")  # CHANGED SNR to SINR
-            logger.info(f"🔧 Current Parameters: Power={current_params.get('transmissionPower', 20):.1f}dBm, Beacon={current_params.get('beaconRate', 10):.2f}Hz, MCS={current_params.get('MCS', 0)}")
+            logger.info(f"  STARTING ACTION SELECTION FOR {self.node_id}")
+            logger.info(f"  Input State: CBR={state[0]:.6f}, SINR={state[1]:.3f}, Neighbors={state[2]}")  # CHANGED SNR to SINR
+            logger.info(f"  Current Parameters: Power={current_params.get('transmissionPower', 20):.1f}dBm, Beacon={current_params.get('beaconRate', 10):.2f}Hz, MCS={current_params.get('MCS', 0)}")
             
             # Retrieve current values with safe defaults
             self.current_power = float(current_params.get('transmissionPower', 20))
             self.current_beacon_rate = float(current_params.get('beaconRate', 10))
             self.current_mcs = int(current_params.get('MCS', 0))
     
-            logger.info(f"🔄 Updated Internal State: Power={self.current_power:.1f}, Beacon={self.current_beacon_rate:.2f}, MCS={self.current_mcs}")
+            logger.info(f"  Updated Internal State: Power={self.current_power:.1f}, Beacon={self.current_beacon_rate:.2f}, MCS={self.current_mcs}")
     
             # Convert state to tensor with proper shape
             state_tensor = safe_tensor_conversion(np.array(state, dtype=np.float32))
             if state_tensor.dim() == 1:
                 state_tensor = state_tensor.unsqueeze(0)
                 
-            logger.info(f"🧠 State tensor prepared: shape={state_tensor.shape}, values={state_tensor.flatten().tolist()}")
+            logger.info(f"  State tensor prepared: shape={state_tensor.shape}, values={state_tensor.flatten().tolist()}")
                 
             if self.debug_mode:
-                logger.info(f"🎲 AGENT EXPLORATION STATUS:")
+                logger.info(f"  AGENT EXPLORATION STATUS:")
                 logger.info(f"   Current Exploration Factor: {self.agent.exploration_factor:.6f}")
                 logger.info(f"   Action History Length: {len(self.agent.recent_actions)}")
     
@@ -726,12 +726,12 @@ class UltraExplorativeVehicleNode:
             with torch.no_grad():
                 features = self.feature_extractor(state_tensor)
                 
-                logger.info(f"🧠 Features extracted: shape={features.shape}")
+                logger.info(f"  Features extracted: shape={features.shape}")
     
                 # Get all actions from single agent
                 actions, log_prob = self.agent.select_action(features)
                 
-                logger.info(f"🎲 RAW ACTIONS GENERATED:")
+                logger.info(f"  RAW ACTIONS GENERATED:")
                 logger.info(f"   Raw Actions: {actions.flatten().tolist()}")
                 logger.info(f"   Log Probability: {log_prob.item():.6f}")
                 
@@ -747,13 +747,13 @@ class UltraExplorativeVehicleNode:
                 
                 # NaN protection
                 if math.isnan(power_delta):
-                    logger.warning(f"⚠️  NaN detected in power_delta, replacing with 0")
+                    logger.warning(f"   NaN detected in power_delta, replacing with 0")
                     power_delta = 0.0
                 if math.isnan(beacon_delta):
-                    logger.warning(f"⚠️  NaN detected in beacon_delta, replacing with 0")
+                    logger.warning(f"   NaN detected in beacon_delta, replacing with 0")
                     beacon_delta = 0.0
                 if math.isnan(mcs_delta):
-                    logger.warning(f"⚠️  NaN detected in mcs_delta, replacing with 0")
+                    logger.warning(f"   NaN detected in mcs_delta, replacing with 0")
                     mcs_delta = 0.0
                 
                 # Clamp deltas to reasonable bounds (align with dual agent)
@@ -761,7 +761,7 @@ class UltraExplorativeVehicleNode:
                 beacon_delta = max(-10.0, min(10.0, beacon_delta))  # Match dual agent bounds
                 mcs_delta = max(-7.5, min(7.5, mcs_delta))  # Match dual agent bounds
                 
-                logger.info(f"🎲 FINAL ACTION DELTAS:")
+                logger.info(f"  FINAL ACTION DELTAS:")
                 logger.info(f"   Power Delta: {power_delta:.6f}")
                 logger.info(f"   Beacon Delta: {beacon_delta:.6f}")
                 logger.info(f"   MCS Delta: {mcs_delta:.6f}")
@@ -780,7 +780,7 @@ class UltraExplorativeVehicleNode:
                 mcs_delta_rounded = round(mcs_delta) if math.isfinite(mcs_delta) else 0
                 new_mcs = max(MCS_MIN, min(MCS_MAX, self.current_mcs + mcs_delta_rounded))
                 
-                logger.info(f"⚙️  PARAMETER ADJUSTMENT CALCULATION:")
+                logger.info(f"   PARAMETER ADJUSTMENT CALCULATION:")
                 logger.info(f"   Old Power: {self.current_power:.1f} dBm → New Power: {new_power:.1f} dBm (Δ={new_power-self.current_power:.1f})")
                 logger.info(f"   Old Beacon: {self.current_beacon_rate:.2f} Hz → New Beacon: {new_beacon:.2f} Hz (Δ={new_beacon-self.current_beacon_rate:.2f})")
                 logger.info(f"   Old MCS: {self.current_mcs} → New MCS: {new_mcs} (Δ={new_mcs-self.current_mcs})")
@@ -796,7 +796,7 @@ class UltraExplorativeVehicleNode:
                 'exploration_factor': self.agent.exploration_factor
             }
             
-            logger.info(f"✅ ACTION SELECTION COMPLETE FOR {self.node_id}:")
+            logger.info(f"  ACTION SELECTION COMPLETE FOR {self.node_id}:")
             logger.info(f"   Power Delta: {result['power_delta']:.6f} → New Power: {result['new_power']:.1f}dBm")
             logger.info(f"   Beacon Delta: {result['beacon_delta']:.6f} → New Beacon: {result['new_beacon_rate']:.2f}Hz") 
             logger.info(f"   MCS Delta: {result['mcs_delta']} → New MCS: {result['new_mcs']}")
@@ -805,8 +805,8 @@ class UltraExplorativeVehicleNode:
             return result
     
         except Exception as e:
-            logger.error(f"❌ Action selection failed for {self.node_id}: {str(e)}")
-            logger.error(f"🔍 Full traceback: {traceback.format_exc()}")
+            logger.error(f"  Action selection failed for {self.node_id}: {str(e)}")
+            logger.error(f"  Full traceback: {traceback.format_exc()}")
             raise RuntimeError(f"Action selection failed: {str(e)}")
 
     def _calculate_action_diversity(self):
@@ -836,7 +836,7 @@ class UltraExplorativeVehicleNode:
             new_beacon_rate = np.clip(new_beacon_rate, BEACON_RATE_MIN, BEACON_RATE_MAX)
             new_mcs = int(np.clip(round(new_mcs), MCS_MIN, MCS_MAX))
             
-            logger.info(f"📤 APPLYING ACTIONS FOR {self.node_id}:")
+            logger.info(f"  APPLYING ACTIONS FOR {self.node_id}:")
             logger.info(f"   Final Power: {new_power:.1f} dBm")
             logger.info(f"   Final Beacon: {new_beacon_rate:.2f} Hz")
             logger.info(f"   Final MCS: {new_mcs}")
@@ -848,7 +848,7 @@ class UltraExplorativeVehicleNode:
             }
             
         except Exception as e:
-            logger.error(f"❌ Action application failed: {str(e)}")
+            logger.error(f"  Action application failed: {str(e)}")
             raise RuntimeError(f"Action application failed: {str(e)}")
 
     def store_experience(self, state, action, reward, next_state, done):
@@ -876,7 +876,7 @@ class UltraExplorativeVehicleNode:
             experience = (state_tensor, action, reward_tensor, next_state_tensor, done_tensor)
             self.agent.replay_buffer.add(experience)
             
-            logger.info(f"💾 EXPERIENCE STORED FOR {self.node_id}:")
+            logger.info(f"  EXPERIENCE STORED FOR {self.node_id}:")
             logger.info(f"   Replay buffer size: {len(self.agent.replay_buffer)}")
             logger.info(f"   Reward: {reward:.6f}")
             
@@ -972,7 +972,7 @@ class UltraExplorativeVehicleNode:
             
             self.train_counter += 1
             
-            logger.info(f"✅ AGENT UPDATE COMPLETE FOR {self.node_id}")
+            logger.info(f"  AGENT UPDATE COMPLETE FOR {self.node_id}")
             logger.info(f"   Actor Loss: {actor_loss.item():.6f}")
             logger.info(f"   Critic1 Loss: {critic1_loss.item():.6f}")
             logger.info(f"   Critic2 Loss: {critic2_loss.item():.6f}")
@@ -997,7 +997,7 @@ class UltraExplorativeVehicleNode:
             mcs_range = np.ptp(list(self.action_history['mcs_deltas'])[-50:])
             
             log_message(
-                f"🚀 EXPLORATION METRICS - Vehicle {self.node_id}: "
+                f"  EXPLORATION METRICS - Vehicle {self.node_id}: "
                 f"Exploration Factor: {self.agent.exploration_factor:.4f}, "
                 f"Power std/range: {power_std:.3f}/{power_range:.1f}, "
                 f"Beacon std/range: {beacon_std:.3f}/{beacon_range:.1f}, "
@@ -1133,9 +1133,9 @@ class UltraExplorativeDecentralizedRLServer:
                 self.shared_agent
             )
         
-        log_message(f"🚀 ULTRA-EXPLORATIVE SINGLE AGENT Server listening on {self.host}:{self.port}")
+        log_message(f"  ULTRA-EXPLORATIVE SINGLE AGENT Server listening on {self.host}:{self.port}")
         log_message(f"Starting in {'TRAINING' if training_mode else 'PRODUCTION'} mode")
-        log_message(f"🎯 Exploration settings:")
+        log_message(f"  Exploration settings:")
         log_message(f"  - Initial exploration factor: {INITIAL_EXPLORATION_FACTOR}")
         log_message(f"  - Power action bounds: ±{POWER_ACTION_BOUND}")
         log_message(f"  - Beacon action bounds: ±{BEACON_ACTION_BOUND}")
@@ -1195,7 +1195,7 @@ class UltraExplorativeDecentralizedRLServer:
                             try:
                                 # Decode JSON message
                                 message = json.loads(message_bytes.decode('utf-8', errors='strict'))
-                                log_message(f"🔄 Processing ULTRA-EXPLORATIVE message from {addr} with {len(message)} vehicles", "DEBUG")
+                                log_message(f"  Processing ULTRA-EXPLORATIVE message from {addr} with {len(message)} vehicles", "DEBUG")
                                 
                                 # Process the message
                                 response = self._process_batch(message, addr)
@@ -1242,18 +1242,18 @@ class UltraExplorativeDecentralizedRLServer:
         """Process a batch of vehicle data with SINR consistency"""
         batch_response = {"vehicles": {}, "timestamp": time.time()}
         
-        logger.info(f"🔄 PROCESSING SINGLE AGENT BATCH from {addr}")
-        logger.info(f"📊 Total vehicles in batch: {len(batch_data)}")
-        logger.info(f"🚗 Vehicle IDs: {list(batch_data.keys())}")
+        logger.info(f"  PROCESSING SINGLE AGENT BATCH from {addr}")
+        logger.info(f"  Total vehicles in batch: {len(batch_data)}")
+        logger.info(f"  Vehicle IDs: {list(batch_data.keys())}")
         
         for vehicle_id, vehicle_data in batch_data.items():
             try:
                 logger.info(f"\n{'='*60}")
-                logger.info(f"🚗 PROCESSING VEHICLE {vehicle_id}")
+                logger.info(f"  PROCESSING VEHICLE {vehicle_id}")
                 logger.info(f"{'='*60}")
                 
                 # CRITICAL FIX: Use SINR instead of SNR (align with dual agent)
-                logger.info(f"📥 RECEIVED FROM SIMULATION:")
+                logger.info(f"  RECEIVED FROM SIMULATION:")
                 logger.info(f"   CBR: {vehicle_data.get('CBR', 0):.6f}")
                 logger.info(f"   SINR: {vehicle_data.get('SINR', 0):.3f} dB")  # CHANGED from SNR to SINR
                 logger.info(f"   Neighbors: {vehicle_data.get('neighbors', 0)}")
@@ -1275,7 +1275,7 @@ class UltraExplorativeDecentralizedRLServer:
                     'MCS': int(vehicle_data.get('MCS', 0))
                 }
                 
-                logger.info(f"🧠 RL STATE PROCESSING:")
+                logger.info(f"  RL STATE PROCESSING:")
                 logger.info(f"  State: CBR={state[0]:.3f}, SINR={state[1]:.1f}dB, Neighbors={int(state[2])}")  # CHANGED SNR to SINR
                 
                 # Initialize vehicle if new
@@ -1284,24 +1284,24 @@ class UltraExplorativeDecentralizedRLServer:
                         vehicle_id, self.shared_feature_extractor,
                         self.shared_agent, self.training_mode
                     )
-                    logger.info(f"✨ CREATED NEW SINGLE AGENT vehicle node {vehicle_id}")
+                    logger.info(f"  CREATED NEW SINGLE AGENT vehicle node {vehicle_id}")
                     logger.info(f"   Initial Exploration Factor: {self.vehicle_nodes[vehicle_id].agent.exploration_factor:.4f}")
                 
                 # Get actions from RL
                 vehicle = self.vehicle_nodes[vehicle_id]
                 
-                logger.info(f"🎯 RL AGENT PROCESSING:")
+                logger.info(f"  RL AGENT PROCESSING:")
                 logger.info(f"   Current Exploration Factor: {vehicle.agent.exploration_factor:.6f}")
                 
                 actions = vehicle.get_actions(state, current_params)
                 new_params = vehicle.apply_actions(actions)
                 
-                logger.info(f"🎲 RL SINGLE AGENT ACTIONS GENERATED:")
+                logger.info(f"  RL SINGLE AGENT ACTIONS GENERATED:")
                 logger.info(f"   Power Delta: {actions['power_delta']:.6f}")
                 logger.info(f"   Beacon Delta: {actions['beacon_delta']:.6f}")
                 logger.info(f"   MCS Delta: {actions['mcs_delta']}")
                 
-                logger.info(f"⚙️  PARAMETER ADJUSTMENT CALCULATION:")
+                logger.info(f"   PARAMETER ADJUSTMENT CALCULATION:")
                 logger.info(f"   Old Power: {current_params['transmissionPower']:.1f} dBm → New Power: {new_params['power']:.1f} dBm")
                 logger.info(f"   Old Beacon: {current_params['beaconRate']:.2f} Hz → New Beacon: {new_params['beacon_rate']:.2f} Hz")
                 logger.info(f"   Old MCS: {current_params['MCS']} → New MCS: {new_params['mcs']}")
@@ -1316,7 +1316,7 @@ class UltraExplorativeDecentralizedRLServer:
                 
                 batch_response["vehicles"][vehicle_id] = response_data
                 
-                logger.info(f"📤 SENDING TO SIMULATION:")
+                logger.info(f"  SENDING TO SIMULATION:")
                 logger.info(f"   Transmission Power: {new_params['power']:.1f} dBm")
                 logger.info(f"   Beacon Rate: {new_params['beacon_rate']:.2f} Hz")
                 logger.info(f"   MCS: {new_params['mcs']}")
@@ -1345,15 +1345,15 @@ class UltraExplorativeDecentralizedRLServer:
                     
                     vehicle.store_experience(state, actions_tensor, reward, next_state, False)
                     
-                    logger.info(f"🎓 TRAINING DATA:")
+                    logger.info(f"  TRAINING DATA:")
                     logger.info(f"   Reward: {reward:.6f}")
                     logger.info(f"   Next State: [CBR={next_state[0]:.6f}, SINR={next_state[1]:.3f}, Neighbors={next_state[2]}]")  # CHANGED SNR to SINR
                     
-                logger.info(f"✅ VEHICLE {vehicle_id} PROCESSING COMPLETE")
+                logger.info(f" VEHICLE {vehicle_id} PROCESSING COMPLETE")
                     
             except Exception as e:
                 error_msg = f"Error processing vehicle {vehicle_id}: {str(e)}"
-                logger.error(f"❌ {error_msg}")
+                logger.error(f" {error_msg}")
                 batch_response["vehicles"][vehicle_id] = {
                     'status': 'error',
                     'error': error_msg,
@@ -1361,9 +1361,9 @@ class UltraExplorativeDecentralizedRLServer:
                 }
         
         logger.info(f"\n{'='*80}")
-        logger.info(f"📋 BATCH PROCESSING SUMMARY")
-        logger.info(f"✅ Successfully processed: {sum(1 for v in batch_response['vehicles'].values() if v.get('status') != 'error')} vehicles")
-        logger.info(f"❌ Failed to process: {sum(1 for v in batch_response['vehicles'].values() if v.get('status') == 'error')} vehicles")
+        logger.info(f" BATCH PROCESSING SUMMARY")
+        logger.info(f" Successfully processed: {sum(1 for v in batch_response['vehicles'].values() if v.get('status') != 'error')} vehicles")
+        logger.info(f" Failed to process: {sum(1 for v in batch_response['vehicles'].values() if v.get('status') == 'error')} vehicles")
         
         return batch_response
 
@@ -1414,7 +1414,7 @@ class UltraExplorativeDecentralizedRLServer:
                 self.shared_agent,
                 episode=self.global_episode_count
             )
-        log_message("🚀 ULTRA-EXPLORATIVE SINGLE AGENT Server stopped")
+        log_message(" ULTRA-EXPLORATIVE SINGLE AGENT Server stopped")
 
 # Legacy wrapper for compatibility
 class DecentralizedRLServer(UltraExplorativeDecentralizedRLServer):
@@ -1428,7 +1428,7 @@ if __name__ == "__main__":
     # Set training_mode=False for production mode
     rl_server = UltraExplorativeDecentralizedRLServer(HOST, PORT, training_mode=True)
     try:
-        log_message("🚀 Starting ULTRA-EXPLORATIVE SINGLE AGENT RL server...")
+        log_message(" Starting ULTRA-EXPLORATIVE SINGLE AGENT RL server...")
         log_message(f"Enhanced exploration settings:")
         log_message(f"  - Initial exploration factor: {INITIAL_EXPLORATION_FACTOR}")
         log_message(f"  - Power action bounds: ±{POWER_ACTION_BOUND}")
@@ -1438,7 +1438,7 @@ if __name__ == "__main__":
         log_message(f"  - ULTRA-VERBOSE logging enabled")
         rl_server.start()
     except KeyboardInterrupt:
-        log_message("🚀 ULTRA-EXPLORATIVE Server interrupted by user. Shutting down...")
+        log_message(" ULTRA-EXPLORATIVE Server interrupted by user. Shutting down...")
         rl_server.stop()
     except Exception as e:
         log_message(f"Fatal error: {str(e)}", "CRITICAL")
