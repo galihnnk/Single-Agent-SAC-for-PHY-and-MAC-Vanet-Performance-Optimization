@@ -29,49 +29,47 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # ULTRA-AGGRESSIVE Constants and Hyperparameters
 # ==============================
 
-# Environment parameters
+# Environment parameters - aligned with dual agent
 N_STEP = 3
 CBR_TARGET = 0.65
-SINR_TARGET = 18  # dB (initial target, will be adjusted based on neighbors)
-POWER_MIN, POWER_MAX = 0, 30  # dBm
-BEACON_RATE_MIN, BEACON_RATE_MAX = 1, 20  # Hz
-MCS_MIN, MCS_MAX = 0, 10  # IEEE 802.11bd MCS indices
-MAX_NEIGHBORS = 20  # Maximum expected neighbors for normalization
+SINR_TARGET = 12.0  # CHANGED from 18 to match dual agent realistic target
+POWER_MIN, POWER_MAX = 1, 30  # CHANGED to match dual agent system_config
+BEACON_RATE_MIN, BEACON_RATE_MAX = 1, 20  # Match dual agent
+MCS_MIN, MCS_MAX = 0, 9  # CHANGED to match dual agent system_config
+MAX_NEIGHBORS = 15  # CHANGED to match dual agent training_config.max_neighbors
 
-# ULTRA-AGGRESSIVE EXPLORATION PARAMETERS FOR FULL PARAMETER SPACE COVERAGE
-# Required deltas for full exploration: Power(±29), Beacon(±19), MCS(±10)
-# With 5x exploration factor: need base bounds of Power(±6), Beacon(±4), MCS(±2)
-POWER_ACTION_BOUND = 8.0      # ±8 (was ±3) - MASSIVE increase
-BEACON_ACTION_BOUND = 6.0     # ±6 (was ±1) - MASSIVE increase  
-MCS_ACTION_BOUND = 3.0        # ±3 (was ±1) - MASSIVE increase
+# ULTRA-AGGRESSIVE EXPLORATION PARAMETERS (aligned with dual agent)
+POWER_ACTION_BOUND = 15.0     # CHANGED to match dual agent realistic bounds
+BEACON_ACTION_BOUND = 10.0    # CHANGED to match dual agent realistic bounds
+MCS_ACTION_BOUND = 7.5        # CHANGED to match dual agent realistic bounds
 
-# Reward weights for single agent
-W1, W2 = 3.0, 1.0  # CBR and power weights
-W3, W4 = 2.5, 0.8  # SINR and MCS weights
-W5 = 1.5  # Neighbor impact weight
-BETA = 15  # CBR reward sharpness
+# Reward weights for single agent (aligned with dual agent)
+W1, W2 = 5.0, 1.0  # CHANGED W1 from 3.0 to 5.0 to match dual agent
+W3, W4 = 3.0, 0.8  # CHANGED W3 from 2.5 to 3.0 to match dual agent  
+W5 = 0.5  # CHANGED from 1.5 to 0.5 to match dual agent (reduced neighbor penalty)
+BETA = 15  # Keep same
 
-# ULTRA-AGGRESSIVE SAC parameters for better exploration
-BUFFER_SIZE = 100000
-BATCH_SIZE = 128
-GAMMA = 0.99
-TAU = 0.005
-ALPHA = 0.2  # Temperature parameter
-LR = 3e-3 
-HIDDEN_UNITS = 256
+# SAC parameters (aligned with dual agent RealisticTrainingConfig)
+BUFFER_SIZE = 120000  # CHANGED from 100000 to match dual agent
+BATCH_SIZE = 256      # CHANGED from 128 to match dual agent
+GAMMA = 0.99          # Keep same
+TAU = 0.003           # CHANGED from 0.005 to match dual agent
+ALPHA = 0.2           # Keep same
+LR = 2e-4             # CHANGED from 3e-3 to match dual agent
+HIDDEN_UNITS = 384    # CHANGED from 256 to match dual agent
 
-# ULTRA-EXPLORATIVE settings
-INITIAL_EXPLORATION_FACTOR = 5.0   # MUCH higher than original (was 2.0)
-EXPLORATION_DECAY = 0.9999         # Much slower decay (was 0.9995)
-MIN_EXPLORATION = 0.8              # Much higher minimum (was 1.0)
-EXPLORATION_NOISE_SCALE = 1.2      # Strong additional noise
-ACTION_NOISE_SCALE = 0.8           # Action-dependent noise
-RANDOM_ACTION_PROB = 0.15          # 15% random actions initially
+# Enhanced exploration (aligned with dual agent)
+INITIAL_EXPLORATION_FACTOR = 2.0   # CHANGED from 5.0 to match dual agent realistic values
+EXPLORATION_DECAY = 0.9998         # Match dual agent
+MIN_EXPLORATION = 0.3              # CHANGED from 0.8 to match dual agent
+EXPLORATION_NOISE_SCALE = 0.6      # CHANGED from 1.2 to match dual agent
+ACTION_NOISE_SCALE = 0.4           # CHANGED from 0.8 to match dual agent
+RANDOM_ACTION_PROB = 0.05          # REDUCED from 0.15 to match dual agent approach
 
-# Enhanced entropy for exploration
-INITIAL_LOG_STD = 1.0              # Much higher initial variance
-LOG_STD_MIN = -8                   # Less restrictive
-LOG_STD_MAX = 4                    # Higher maximum variance
+# Enhanced entropy (aligned with dual agent)
+INITIAL_LOG_STD = 0.5              # CHANGED from 1.0 to match dual agent
+LOG_STD_MIN = -10                  # CHANGED from -8 to match dual agent
+LOG_STD_MAX = 2                    # CHANGED from 4 to match dual agent
 
 # Network setup
 HOST = '127.0.0.1'
@@ -417,28 +415,28 @@ class UltraExplorativeActor(nn.Module):
         return torch.cat([power_mean, beacon_mean, mcs_mean], dim=-1)
     
     def sample(self, x):
-        """Sample actions with MAXIMUM exploration"""
+        """Sample actions with improved exploration aligned with dual agent"""
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
         
-        # ENHANCED LOG STD CLAMPING for more exploration
+        # Enhanced log std clamping (align with dual agent values)
         power_log_std = torch.clamp(self.power_logstd, LOG_STD_MIN, LOG_STD_MAX)
         beacon_log_std = torch.clamp(self.beacon_logstd, LOG_STD_MIN, LOG_STD_MAX)
         mcs_log_std = torch.clamp(self.mcs_logstd, LOG_STD_MIN, LOG_STD_MAX)
         
-        # Power action with LARGE bounds
+        # Power action with realistic bounds (align with dual agent)
         power_mean = torch.tanh(self.power_mean(x)) * POWER_ACTION_BOUND
         power_std = torch.exp(power_log_std)
         power_noise = torch.randn_like(power_mean)
         power_action = power_mean + power_noise * power_std
         
-        # Beacon action with LARGE bounds
+        # Beacon action with realistic bounds (align with dual agent)
         beacon_mean = torch.tanh(self.beacon_mean(x)) * BEACON_ACTION_BOUND
         beacon_std = torch.exp(beacon_log_std)
         beacon_noise = torch.randn_like(beacon_mean)
         beacon_action = beacon_mean + beacon_noise * beacon_std
         
-        # MCS action with LARGE bounds
+        # MCS action with realistic bounds (align with dual agent)
         mcs_mean = torch.tanh(self.mcs_mean(x)) * MCS_ACTION_BOUND
         mcs_std = torch.exp(mcs_log_std)
         mcs_noise = torch.randn_like(mcs_mean)
@@ -606,31 +604,66 @@ class UltraExplorativeSingleAgent:
             return actions, log_prob
    
     def calculate_reward(self, cbr, sinr, current_power, current_mcs, neighbor_count):
-        """Enhanced reward function with exploration bonus"""
-        # Standard reward components
-        cbr_error = abs(cbr - CBR_TARGET)
-        cbr_term = W1 * (1 - math.tanh(BETA * cbr_error))
-        
-        power_norm = (current_power - POWER_MIN) / (POWER_MAX - POWER_MIN)
-        power_term = W2 * power_norm ** 1.5
-        
-        adaptive_sinr_target = max(10, SINR_TARGET - (neighbor_count / 5))
-        sinr_diff = sinr - adaptive_sinr_target
-        sinr_term = W3 * math.tanh(sinr_diff/5.0)
-        
-        mcs_norm = (current_mcs - MCS_MIN) / (MCS_MAX - MCS_MIN)
-        mcs_term = W4 * (1 - mcs_norm)
-        
-        neighbor_impact = W5 * (neighbor_count / MAX_NEIGHBORS)
-        
-        base_reward = cbr_term - power_term + sinr_term + mcs_term - neighbor_impact
-        
-        # EXPLORATION BONUS during early training
-        if self.exploration_factor > 1.0:
-            exploration_bonus = 0.2 * self.exploration_factor  # Increased bonus
-            base_reward += exploration_bonus
-        
-        return base_reward
+        """Enhanced reward function aligned with dual agent improvements"""
+        try:
+            # Adaptive SINR target (align with dual agent logic)
+            adaptive_sinr_target = max(8.0, SINR_TARGET - (neighbor_count / 5))  # More realistic adaptation
+            
+            # CBR term (align with dual agent approach)
+            cbr_error = abs(cbr - CBR_TARGET)
+            if cbr_error < 0.05:  # Very close to target
+                cbr_term = W1 * 2.0  # Bonus for being close
+            else:
+                cbr_term = W1 * max(0, 1 - cbr_error * 2.0)  # Linear penalty like dual agent
+            
+            # Power term (align with dual agent approach)
+            power_norm = (current_power - POWER_MIN) / (POWER_MAX - POWER_MIN)
+            power_term = W2 * (power_norm ** 2)  # Quadratic penalty
+            
+            # SINR term (use dual agent tanh approach for consistency)
+            sinr_diff = sinr - adaptive_sinr_target
+            sinr_term = W3 * math.tanh(sinr_diff / 5.0)
+            
+            # MCS term (align with dual agent density-aware approach)
+            density_factor = min(1.0, neighbor_count / MAX_NEIGHBORS)
+            mcs_norm = (current_mcs - MCS_MIN) / (MCS_MAX - MCS_MIN)
+            
+            if density_factor > 0.7:  # High density - prefer robust (low) MCS
+                mcs_term = W4 * 0.5 * (1 - mcs_norm)
+            else:  # Low density - prefer efficient (high) MCS
+                mcs_term = W4 * 0.5 * mcs_norm
+            
+            # Neighbor impact (align with dual agent reduced penalty)
+            neighbor_impact = W5 * (neighbor_count / MAX_NEIGHBORS)
+            
+            # Base reward calculation
+            base_reward = cbr_term - power_term + sinr_term + mcs_term - neighbor_impact
+            
+            # Exploration bonus during early training (align with dual agent)
+            if self.exploration_factor > 1.0:
+                exploration_bonus = 0.2 * self.exploration_factor  # Match dual agent bonus
+                base_reward += exploration_bonus
+            
+            # Amplify differences for better learning (align with dual agent)
+            base_reward = base_reward * 1.5
+            
+            # Add performance bonuses/penalties (align with dual agent)
+            if cbr_error < 0.05:  # Excellent CBR
+                base_reward += 3.0
+            elif cbr_error > 0.3:  # Poor CBR
+                base_reward -= 2.0
+            
+            sinr_error = abs(sinr - adaptive_sinr_target)
+            if sinr_error < 2.0:  # Excellent SINR
+                base_reward += 2.0
+            elif sinr_error > 8.0:  # Poor SINR
+                base_reward -= 2.0
+            
+            return float(base_reward)
+            
+        except Exception as e:
+            logger.error(f"Reward calculation failed: {e}")
+            return 0.0
 
 # ==============================
 # Enhanced Vehicle Node Implementation
@@ -664,10 +697,10 @@ class UltraExplorativeVehicleNode:
         }
 
     def get_actions(self, state, current_params):
-        """Get ULTRA-EXPLORATIVE actions for ALL parameters with ULTRA-VERBOSE logging"""
+        """Get actions with dual agent consistency improvements"""
         try:
-            logger.info(f"🎯 STARTING ULTRA-EXPLORATIVE ACTION SELECTION FOR {self.node_id}")
-            logger.info(f"📊 Input State: CBR={state[0]:.6f}, SNR={state[1]:.3f}, Neighbors={state[2]}")
+            logger.info(f"🎯 STARTING ACTION SELECTION FOR {self.node_id}")
+            logger.info(f"📊 Input State: CBR={state[0]:.6f}, SINR={state[1]:.3f}, Neighbors={state[2]}")  # CHANGED SNR to SINR
             logger.info(f"🔧 Current Parameters: Power={current_params.get('transmissionPower', 20):.1f}dBm, Beacon={current_params.get('beaconRate', 10):.2f}Hz, MCS={current_params.get('MCS', 0)}")
             
             # Retrieve current values with safe defaults
@@ -688,15 +721,14 @@ class UltraExplorativeVehicleNode:
                 logger.info(f"🎲 AGENT EXPLORATION STATUS:")
                 logger.info(f"   Current Exploration Factor: {self.agent.exploration_factor:.6f}")
                 logger.info(f"   Action History Length: {len(self.agent.recent_actions)}")
-                logger.info(f"   Recent Action Diversity: {self._calculate_action_diversity()}")
     
-            # Inference from ULTRA-EXPLORATIVE agent
+            # Inference from agent
             with torch.no_grad():
                 features = self.feature_extractor(state_tensor)
                 
                 logger.info(f"🧠 Features extracted: shape={features.shape}")
     
-                # Get all actions from ULTRA-EXPLORATIVE single agent
+                # Get all actions from single agent
                 actions, log_prob = self.agent.select_action(features)
                 
                 logger.info(f"🎲 RAW ACTIONS GENERATED:")
@@ -713,7 +745,7 @@ class UltraExplorativeVehicleNode:
                 beacon_delta = actions[0, 1].item()
                 mcs_delta = actions[0, 2].item()
                 
-                # CRITICAL: Check for NaN values and replace with zeros
+                # NaN protection
                 if math.isnan(power_delta):
                     logger.warning(f"⚠️  NaN detected in power_delta, replacing with 0")
                     power_delta = 0.0
@@ -724,10 +756,10 @@ class UltraExplorativeVehicleNode:
                     logger.warning(f"⚠️  NaN detected in mcs_delta, replacing with 0")
                     mcs_delta = 0.0
                 
-                # Clamp deltas to reasonable bounds
-                power_delta = max(-20.0, min(20.0, power_delta))
-                beacon_delta = max(-15.0, min(15.0, beacon_delta))
-                mcs_delta = max(-8.0, min(8.0, mcs_delta))
+                # Clamp deltas to reasonable bounds (align with dual agent)
+                power_delta = max(-15.0, min(15.0, power_delta))  # Match dual agent bounds
+                beacon_delta = max(-10.0, min(10.0, beacon_delta))  # Match dual agent bounds
+                mcs_delta = max(-7.5, min(7.5, mcs_delta))  # Match dual agent bounds
                 
                 logger.info(f"🎲 FINAL ACTION DELTAS:")
                 logger.info(f"   Power Delta: {power_delta:.6f}")
@@ -752,15 +784,6 @@ class UltraExplorativeVehicleNode:
                 logger.info(f"   Old Power: {self.current_power:.1f} dBm → New Power: {new_power:.1f} dBm (Δ={new_power-self.current_power:.1f})")
                 logger.info(f"   Old Beacon: {self.current_beacon_rate:.2f} Hz → New Beacon: {new_beacon:.2f} Hz (Δ={new_beacon-self.current_beacon_rate:.2f})")
                 logger.info(f"   Old MCS: {self.current_mcs} → New MCS: {new_mcs} (Δ={new_mcs-self.current_mcs})")
-                
-                if self.debug_mode:
-                    # Log diversity metrics
-                    if len(self.action_history['power_deltas']) > 10:
-                        power_std = np.std(list(self.action_history['power_deltas'])[-50:])
-                        beacon_std = np.std(list(self.action_history['beacon_deltas'])[-50:])
-                        mcs_std = np.std(list(self.action_history['mcs_deltas'])[-50:])
-                        logger.info(f"📊 ACTION DIVERSITY METRICS:")
-                        logger.info(f"   Power std: {power_std:.3f}, Beacon std: {beacon_std:.3f}, MCS std: {mcs_std:.3f}")
     
             result = {
                 'power_delta': float(power_delta),
@@ -773,7 +796,7 @@ class UltraExplorativeVehicleNode:
                 'exploration_factor': self.agent.exploration_factor
             }
             
-            logger.info(f"✅ ULTRA-EXPLORATIVE ACTIONS COMPLETE FOR {self.node_id}:")
+            logger.info(f"✅ ACTION SELECTION COMPLETE FOR {self.node_id}:")
             logger.info(f"   Power Delta: {result['power_delta']:.6f} → New Power: {result['new_power']:.1f}dBm")
             logger.info(f"   Beacon Delta: {result['beacon_delta']:.6f} → New Beacon: {result['new_beacon_rate']:.2f}Hz") 
             logger.info(f"   MCS Delta: {result['mcs_delta']} → New MCS: {result['new_mcs']}")
@@ -782,7 +805,7 @@ class UltraExplorativeVehicleNode:
             return result
     
         except Exception as e:
-            logger.error(f"❌ ULTRA-EXPLORATIVE Action selection failed for {self.node_id}: {str(e)}")
+            logger.error(f"❌ Action selection failed for {self.node_id}: {str(e)}")
             logger.error(f"🔍 Full traceback: {traceback.format_exc()}")
             raise RuntimeError(f"Action selection failed: {str(e)}")
 
@@ -1216,35 +1239,32 @@ class UltraExplorativeDecentralizedRLServer:
             log_message(f"Connection closed. Duration: {duration:.2f}s", "INFO")
         
     def _process_batch(self, batch_data, addr):
-        """Process a batch of vehicle data with ULTRA-VERBOSE logging"""
+        """Process a batch of vehicle data with SINR consistency"""
         batch_response = {"vehicles": {}, "timestamp": time.time()}
         
-        # VERBOSE: Log the incoming batch metadata
-        logger.info(f"🔄 PROCESSING ULTRA-EXPLORATIVE SINGLE AGENT BATCH from {addr}")
+        logger.info(f"🔄 PROCESSING SINGLE AGENT BATCH from {addr}")
         logger.info(f"📊 Total vehicles in batch: {len(batch_data)}")
         logger.info(f"🚗 Vehicle IDs: {list(batch_data.keys())}")
         
-        # Process each vehicle in the batch with detailed logging
         for vehicle_id, vehicle_data in batch_data.items():
             try:
                 logger.info(f"\n{'='*60}")
                 logger.info(f"🚗 PROCESSING VEHICLE {vehicle_id}")
                 logger.info(f"{'='*60}")
                 
-                # VERBOSE: Log incoming vehicle data from MATLAB
-                logger.info(f"📥 RECEIVED FROM MATLAB:")
+                # CRITICAL FIX: Use SINR instead of SNR (align with dual agent)
+                logger.info(f"📥 RECEIVED FROM SIMULATION:")
                 logger.info(f"   CBR: {vehicle_data.get('CBR', 0):.6f}")
-                logger.info(f"   SNR: {vehicle_data.get('SNR', 0):.3f} dB")
+                logger.info(f"   SINR: {vehicle_data.get('SINR', 0):.3f} dB")  # CHANGED from SNR to SINR
                 logger.info(f"   Neighbors: {vehicle_data.get('neighbors', 0)}")
                 logger.info(f"   Current Power: {vehicle_data.get('transmissionPower', 20):.1f} dBm")
                 logger.info(f"   Current Beacon: {vehicle_data.get('beaconRate', 10):.2f} Hz")
                 logger.info(f"   Current MCS: {vehicle_data.get('MCS', 0)}")
-                logger.info(f"   Timestamp: {vehicle_data.get('timestamp', time.time())}")
-
-                # Get current state
+    
+                # Get current state - CRITICAL FIX: Use SINR field
                 state = [
                     float(vehicle_data.get('CBR', 0)),
-                    float(vehicle_data.get('SINR', 0)),
+                    float(vehicle_data.get('SINR', 0)),      # CHANGED from 'SNR' to 'SINR'
                     float(vehicle_data.get('neighbors', 0))
                 ]
                 
@@ -1255,19 +1275,19 @@ class UltraExplorativeDecentralizedRLServer:
                     'MCS': int(vehicle_data.get('MCS', 0))
                 }
                 
-                logger.info(f" RL STATE PROCESSING:")
-                logger.info(f"  State: CBR={state[0]:.3f}, SINR={state[1]:.1f}dB, Neighbors={int(state[2])}")
+                logger.info(f"🧠 RL STATE PROCESSING:")
+                logger.info(f"  State: CBR={state[0]:.3f}, SINR={state[1]:.1f}dB, Neighbors={int(state[2])}")  # CHANGED SNR to SINR
                 
-                # Initialize vehicle if new with ULTRA-EXPLORATIVE agent
+                # Initialize vehicle if new
                 if vehicle_id not in self.vehicle_nodes:
                     self.vehicle_nodes[vehicle_id] = UltraExplorativeVehicleNode(
                         vehicle_id, self.shared_feature_extractor,
                         self.shared_agent, self.training_mode
                     )
-                    logger.info(f"✨ CREATED NEW ULTRA-EXPLORATIVE SINGLE AGENT vehicle node {vehicle_id}")
+                    logger.info(f"✨ CREATED NEW SINGLE AGENT vehicle node {vehicle_id}")
                     logger.info(f"   Initial Exploration Factor: {self.vehicle_nodes[vehicle_id].agent.exploration_factor:.4f}")
                 
-                # Get ULTRA-EXPLORATIVE actions from RL
+                # Get actions from RL
                 vehicle = self.vehicle_nodes[vehicle_id]
                 
                 logger.info(f"🎯 RL AGENT PROCESSING:")
@@ -1276,16 +1296,15 @@ class UltraExplorativeDecentralizedRLServer:
                 actions = vehicle.get_actions(state, current_params)
                 new_params = vehicle.apply_actions(actions)
                 
-                # VERBOSE: Log the RL processing results
                 logger.info(f"🎲 RL SINGLE AGENT ACTIONS GENERATED:")
                 logger.info(f"   Power Delta: {actions['power_delta']:.6f}")
                 logger.info(f"   Beacon Delta: {actions['beacon_delta']:.6f}")
                 logger.info(f"   MCS Delta: {actions['mcs_delta']}")
                 
                 logger.info(f"⚙️  PARAMETER ADJUSTMENT CALCULATION:")
-                logger.info(f"   Old Power: {current_params['transmissionPower']:.1f} dBm → New Power: {new_params['power']:.1f} dBm (Δ={new_params['power']-current_params['transmissionPower']:.1f})")
-                logger.info(f"   Old Beacon: {current_params['beaconRate']:.2f} Hz → New Beacon: {new_params['beacon_rate']:.2f} Hz (Δ={new_params['beacon_rate']-current_params['beaconRate']:.2f})")
-                logger.info(f"   Old MCS: {current_params['MCS']} → New MCS: {new_params['mcs']} (Δ={new_params['mcs']-current_params['MCS']})")
+                logger.info(f"   Old Power: {current_params['transmissionPower']:.1f} dBm → New Power: {new_params['power']:.1f} dBm")
+                logger.info(f"   Old Beacon: {current_params['beaconRate']:.2f} Hz → New Beacon: {new_params['beacon_rate']:.2f} Hz")
+                logger.info(f"   Old MCS: {current_params['MCS']} → New MCS: {new_params['mcs']}")
                 
                 # Prepare response
                 response_data = {
@@ -1297,14 +1316,12 @@ class UltraExplorativeDecentralizedRLServer:
                 
                 batch_response["vehicles"][vehicle_id] = response_data
                 
-                # VERBOSE: Log the final response being sent back to MATLAB
-                logger.info(f"📤 SENDING TO MATLAB:")
+                logger.info(f"📤 SENDING TO SIMULATION:")
                 logger.info(f"   Transmission Power: {new_params['power']:.1f} dBm")
                 logger.info(f"   Beacon Rate: {new_params['beacon_rate']:.2f} Hz")
                 logger.info(f"   MCS: {new_params['mcs']}")
-                logger.info(f"   Status: SUCCESS")
                 
-                # Add enhanced training info
+                # Enhanced training (align with dual agent approach)
                 if self.training_mode:
                     next_state = self._simulate_next_state(state)
                     reward = vehicle.agent.calculate_reward(
@@ -1328,32 +1345,25 @@ class UltraExplorativeDecentralizedRLServer:
                     
                     vehicle.store_experience(state, actions_tensor, reward, next_state, False)
                     
-                    # VERBOSE: Log enhanced training information
                     logger.info(f"🎓 TRAINING DATA:")
                     logger.info(f"   Reward: {reward:.6f}")
-                    logger.info(f"   Next State: [CBR={next_state[0]:.6f}, SNR={next_state[1]:.3f}, Neighbors={next_state[2]}]")
-                    logger.info(f"   Experience Stored: Buffer size={len(vehicle.agent.replay_buffer)}")
+                    logger.info(f"   Next State: [CBR={next_state[0]:.6f}, SINR={next_state[1]:.3f}, Neighbors={next_state[2]}]")  # CHANGED SNR to SINR
                     
                 logger.info(f"✅ VEHICLE {vehicle_id} PROCESSING COMPLETE")
                     
             except Exception as e:
                 error_msg = f"Error processing vehicle {vehicle_id}: {str(e)}"
                 logger.error(f"❌ {error_msg}")
-                logger.error(f"🔍 Full traceback: {traceback.format_exc()}")
                 batch_response["vehicles"][vehicle_id] = {
                     'status': 'error',
                     'error': error_msg,
                     'timestamp': vehicle_data.get('timestamp', time.time())
                 }
         
-        # VERBOSE: Log batch completion summary
         logger.info(f"\n{'='*80}")
         logger.info(f"📋 BATCH PROCESSING SUMMARY")
-        logger.info(f"{'='*80}")
         logger.info(f"✅ Successfully processed: {sum(1 for v in batch_response['vehicles'].values() if v.get('status') != 'error')} vehicles")
         logger.info(f"❌ Failed to process: {sum(1 for v in batch_response['vehicles'].values() if v.get('status') == 'error')} vehicles")
-        logger.info(f"🕐 Total processing time: {time.time() - batch_response['timestamp']:.4f} seconds")
-        logger.info(f"📤 Sending response back to MATLAB...")
         
         return batch_response
 
@@ -1372,23 +1382,23 @@ class UltraExplorativeDecentralizedRLServer:
             pass
 
     def _simulate_next_state(self, current_state):
-        """Simple environment transition model for training"""
+        """Simple environment transition model aligned with dual agent"""
         try:
-            cbr, snr, neighbors = current_state
+            cbr, sinr, neighbors = current_state  # CHANGED: sinr instead of snr
             
-            # Simulate CBR change (with noise and boundary checks)
+            # Simulate CBR change (align with dual agent approach)
             new_cbr = cbr + random.uniform(-0.05, 0.05)
             new_cbr = max(0.0, min(1.0, new_cbr))
             
-            # Simulate SNR change (with noise and minimum threshold)
-            new_snr = snr + random.uniform(-2.0, 2.0)
-            new_snr = max(0.0, new_snr)
+            # Simulate SINR change (align with dual agent approach)
+            new_sinr = sinr + random.uniform(-2.0, 2.0)
+            new_sinr = max(0.0, new_sinr)
             
-            # Simulate neighbor count change (discrete changes)
+            # Simulate neighbor count change (align with dual agent approach)
             neighbor_change = random.choice([-1, 0, 1])
             new_neighbors = max(0, neighbors + neighbor_change)
             
-            return [new_cbr, new_snr, new_neighbors]
+            return [new_cbr, new_sinr, new_neighbors]
         except Exception as e:
             logger.error(f"Error in state simulation: {e}")
             return current_state
