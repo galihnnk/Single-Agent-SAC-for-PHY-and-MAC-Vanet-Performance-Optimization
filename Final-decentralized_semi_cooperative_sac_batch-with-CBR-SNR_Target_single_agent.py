@@ -82,11 +82,6 @@ os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
 MAX_LOG_LENGTH = 200  # Max characters to log for data payloads
 
-# Clear existing model directory
-import shutil
-if os.path.exists(MODEL_SAVE_DIR):
-    shutil.rmtree(MODEL_SAVE_DIR)
-os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
 # ==============================
 # Enhanced Logging Setup
@@ -108,6 +103,20 @@ logger = setup_logging()
 def log_message(message: str, level: str = "INFO"):
     """Backward compatibility logging function"""
     getattr(logger, level.lower())(message)
+
+# ==============================
+# Model Directory Setup
+# ==============================
+# MODIFIED: Don't clear existing models, just ensure directory exists
+os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
+
+# Log existing models using logger directly (since log_message isn't available yet)
+if os.path.exists(MODEL_SAVE_DIR):
+    existing_models = os.listdir(MODEL_SAVE_DIR)
+    if existing_models:
+        logger.info(f"Found existing models: {existing_models}")
+    else:
+        logger.info("No existing models found, starting fresh")
 
 # ==============================
 # Utility Functions
@@ -235,12 +244,46 @@ class PrioritizedReplayBuffer:
         return batch, weights, tree_idxs
 
     def update_priorities(self, data_idxs, priorities):
-        if isinstance(priorities, torch.Tensor):
-            priorities = priorities.detach().cpu().numpy()
-        for data_idx, priority in zip(data_idxs, priorities):
-            priority = (priority + self.eps) ** self.alpha
-            self.tree.update(data_idx, priority)
-            self.max_priority = max(self.max_priority, priority)
+        """Update priorities with proper error handling"""
+        try:
+            if isinstance(priorities, torch.Tensor):
+                priorities = priorities.detach().cpu().numpy()
+            
+            # Ensure priorities is a 1D numpy array
+            if isinstance(priorities, np.ndarray):
+                priorities = priorities.flatten()
+            
+            # Ensure data_idxs is iterable
+            if not hasattr(data_idxs, '__iter__'):
+                data_idxs = [data_idxs]
+            
+            for data_idx, priority in zip(data_idxs, priorities):
+                # Ensure priority is a scalar
+                if isinstance(priority, (np.ndarray, list)):
+                    priority = float(priority.item() if hasattr(priority, 'item') else priority[0])
+                else:
+                    priority = float(priority)
+                
+                # Ensure priority is finite and positive
+                if not np.isfinite(priority) or priority <= 0:
+                    priority = self.eps
+                
+                priority = (priority + self.eps) ** self.alpha
+                self.tree.update(data_idx, priority)
+                
+                # Safely update max_priority
+                if np.isfinite(priority):
+                    self.max_priority = max(float(self.max_priority), float(priority))
+                    
+        except Exception as e:
+            logger.error(f"Error updating priorities: {e}")
+            # Fallback to eps for all priorities
+            for data_idx in data_idxs:
+                try:
+                    priority = self.eps ** self.alpha
+                    self.tree.update(data_idx, priority)
+                except:
+                    pass
 
     def __len__(self):
         return self.real_size
@@ -416,43 +459,64 @@ class UltraExplorativeActor(nn.Module):
     
     def sample(self, x):
         """Sample actions with improved exploration aligned with dual agent"""
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        
-        # Enhanced log std clamping (align with dual agent values)
-        power_log_std = torch.clamp(self.power_logstd, LOG_STD_MIN, LOG_STD_MAX)
-        beacon_log_std = torch.clamp(self.beacon_logstd, LOG_STD_MIN, LOG_STD_MAX)
-        mcs_log_std = torch.clamp(self.mcs_logstd, LOG_STD_MIN, LOG_STD_MAX)
-        
-        # Power action with realistic bounds (align with dual agent)
-        power_mean = torch.tanh(self.power_mean(x)) * POWER_ACTION_BOUND
-        power_std = torch.exp(power_log_std)
-        power_noise = torch.randn_like(power_mean)
-        power_action = power_mean + power_noise * power_std
-        
-        # Beacon action with realistic bounds (align with dual agent)
-        beacon_mean = torch.tanh(self.beacon_mean(x)) * BEACON_ACTION_BOUND
-        beacon_std = torch.exp(beacon_log_std)
-        beacon_noise = torch.randn_like(beacon_mean)
-        beacon_action = beacon_mean + beacon_noise * beacon_std
-        
-        # MCS action with realistic bounds (align with dual agent)
-        mcs_mean = torch.tanh(self.mcs_mean(x)) * MCS_ACTION_BOUND
-        mcs_std = torch.exp(mcs_log_std)
-        mcs_noise = torch.randn_like(mcs_mean)
-        mcs_action = mcs_mean + mcs_noise * mcs_std
-        
-        # Calculate log probabilities
-        power_dist = Normal(power_mean, power_std)
-        beacon_dist = Normal(beacon_mean, beacon_std)
-        mcs_dist = Normal(mcs_mean, mcs_std)
-        
-        log_prob = power_dist.log_prob(power_action) + beacon_dist.log_prob(beacon_action) + mcs_dist.log_prob(mcs_action)
-        
-        # Stack actions
-        actions = torch.stack([power_action.squeeze(-1), beacon_action.squeeze(-1), mcs_action.squeeze(-1)], dim=-1)
-        
-        return actions, log_prob
+        try:
+            x = torch.relu(self.fc1(x))
+            x = torch.relu(self.fc2(x))
+            
+            # Enhanced log std clamping (align with dual agent values)
+            power_log_std = torch.clamp(self.power_logstd, LOG_STD_MIN, LOG_STD_MAX)
+            beacon_log_std = torch.clamp(self.beacon_logstd, LOG_STD_MIN, LOG_STD_MAX)
+            mcs_log_std = torch.clamp(self.mcs_logstd, LOG_STD_MIN, LOG_STD_MAX)
+            
+            # Power action with realistic bounds (align with dual agent)
+            power_mean = torch.tanh(self.power_mean(x)) * POWER_ACTION_BOUND
+            power_std = torch.exp(power_log_std)
+            power_noise = torch.randn_like(power_mean)
+            power_action = power_mean + power_noise * power_std
+            
+            # Beacon action with realistic bounds (align with dual agent)
+            beacon_mean = torch.tanh(self.beacon_mean(x)) * BEACON_ACTION_BOUND
+            beacon_std = torch.exp(beacon_log_std)
+            beacon_noise = torch.randn_like(beacon_mean)
+            beacon_action = beacon_mean + beacon_noise * beacon_std
+            
+            # MCS action with realistic bounds (align with dual agent)
+            mcs_mean = torch.tanh(self.mcs_mean(x)) * MCS_ACTION_BOUND
+            mcs_std = torch.exp(mcs_log_std)
+            mcs_noise = torch.randn_like(mcs_mean)
+            mcs_action = mcs_mean + mcs_noise * mcs_std
+            
+            # Calculate log probabilities with safety checks
+            power_dist = Normal(power_mean, power_std + 1e-8)
+            beacon_dist = Normal(beacon_mean, beacon_std + 1e-8)
+            mcs_dist = Normal(mcs_mean, mcs_std + 1e-8)
+            
+            power_log_prob = power_dist.log_prob(power_action)
+            beacon_log_prob = beacon_dist.log_prob(beacon_action)
+            mcs_log_prob = mcs_dist.log_prob(mcs_action)
+            
+            # Ensure log_probs are finite
+            power_log_prob = torch.where(torch.isfinite(power_log_prob), power_log_prob, torch.tensor(-10.0))
+            beacon_log_prob = torch.where(torch.isfinite(beacon_log_prob), beacon_log_prob, torch.tensor(-10.0))
+            mcs_log_prob = torch.where(torch.isfinite(mcs_log_prob), mcs_log_prob, torch.tensor(-10.0))
+            
+            log_prob = power_log_prob + beacon_log_prob + mcs_log_prob
+            
+            # Stack actions
+            actions = torch.stack([power_action.squeeze(-1), beacon_action.squeeze(-1), mcs_action.squeeze(-1)], dim=-1)
+            
+            # Ensure actions are finite
+            actions = torch.where(torch.isfinite(actions), actions, torch.zeros_like(actions))
+            
+            return actions, log_prob
+            
+        except Exception as e:
+            logger.error(f"Error in actor sample: {e}")
+            # Return safe fallback
+            batch_size = x.shape[0] if x.dim() > 1 else 1
+            safe_actions = torch.zeros(batch_size, 3)
+            safe_log_prob = torch.tensor(-10.0)
+            return safe_actions, safe_log_prob
 
 class QNetwork(nn.Module):
     """Enhanced critic network"""
@@ -886,6 +950,13 @@ class UltraExplorativeVehicleNode:
                 logger.info(f"🎓 TRIGGERING AGENT TRAINING FOR {self.node_id}")
                 self.update_agent()
                 
+            # ADDED: Save models more frequently during training
+            if (self.training_mode and 
+                len(self.agent.replay_buffer) >= BATCH_SIZE and
+                self.train_counter % 50 == 0):  # Save every 50 training steps
+                logger.info(f"💾 SAVING MODELS FOR {self.node_id} at training step {self.train_counter}")
+                self.save_models()
+                
         except Exception as e:
             log_message(f"Error storing experience: {str(e)}", "ERROR")
 
@@ -895,7 +966,7 @@ class UltraExplorativeVehicleNode:
             return
             
         try:
-            logger.info(f"🎓 STARTING AGENT UPDATE FOR {self.node_id}")
+            logger.info(f" STARTING AGENT UPDATE FOR {self.node_id}")
             
             # Sample batch with priorities
             batch, weights, indices = self.agent.replay_buffer.sample(BATCH_SIZE)
@@ -916,7 +987,7 @@ class UltraExplorativeVehicleNode:
                 target_q2 = self.agent.target_critic2(next_features, next_actions)
                 target_q = torch.min(target_q1, target_q2) - self.agent.log_alpha.exp() * next_log_probs.unsqueeze(-1)
                 target_q = rewards.unsqueeze(-1) + (1 - dones.unsqueeze(-1)) * GAMMA * target_q
-
+    
             # Update critics
             current_q1 = self.agent.critic1(features, actions)
             current_q2 = self.agent.critic2(features, actions)
@@ -927,9 +998,15 @@ class UltraExplorativeVehicleNode:
             critic1_loss = (td_errors1.pow(2) * weights.unsqueeze(-1)).mean()
             critic2_loss = (td_errors2.pow(2) * weights.unsqueeze(-1)).mean()
             
-            # Update priorities
-            td_errors = torch.min(td_errors1.abs(), td_errors2.abs()).detach()
-            self.agent.replay_buffer.update_priorities(indices, td_errors.cpu().numpy())
+            # FIXED: Update priorities with proper shape handling
+            td_errors = torch.min(td_errors1.abs(), td_errors2.abs()).squeeze(-1).detach()
+            # Ensure td_errors is 1D and convert to numpy
+            if td_errors.dim() > 1:
+                td_errors = td_errors.flatten()
+            priorities_np = td_errors.cpu().numpy()
+            # Ensure priorities are finite and positive
+            priorities_np = np.clip(priorities_np, 1e-6, 1e6)
+            self.agent.replay_buffer.update_priorities(indices, priorities_np)
             
             self.agent.critic1_optim.zero_grad()
             critic1_loss.backward()
@@ -984,6 +1061,8 @@ class UltraExplorativeVehicleNode:
                 
         except Exception as e:
             log_message(f"Error updating agent: {str(e)}", "ERROR")
+            # Log full traceback for debugging
+            logger.error(f"Full traceback: {traceback.format_exc()}")
 
     def _log_exploration_metrics(self):
         """Log enhanced exploration metrics"""
@@ -1253,6 +1332,9 @@ class UltraExplorativeDecentralizedRLServer:
         logger.info(f"  Total vehicles in batch: {len(batch_data)}")
         logger.info(f"  Vehicle IDs: {list(batch_data.keys())}")
         
+        # INCREMENT EPISODE COUNT - this was missing!
+        self.global_episode_count += 1
+        
         for vehicle_id, vehicle_data in batch_data.items():
             try:
                 logger.info(f"\n{'='*60}")
@@ -1293,9 +1375,12 @@ class UltraExplorativeDecentralizedRLServer:
                     )
                     logger.info(f"  CREATED NEW SINGLE AGENT vehicle node {vehicle_id}")
                     logger.info(f"   Initial Exploration Factor: {self.vehicle_nodes[vehicle_id].agent.exploration_factor:.4f}")
-                
+    
                 # Get actions from RL
                 vehicle = self.vehicle_nodes[vehicle_id]
+                
+                # UPDATE EPISODE COUNT FOR VEHICLE - this was also missing!
+                vehicle.episode_count = self.global_episode_count
                 
                 logger.info(f"  RL AGENT PROCESSING:")
                 logger.info(f"   Current Exploration Factor: {vehicle.agent.exploration_factor:.6f}")
@@ -1356,6 +1441,9 @@ class UltraExplorativeDecentralizedRLServer:
                     logger.info(f"   Reward: {reward:.6f}")
                     logger.info(f"   Next State: [CBR={next_state[0]:.6f}, SINR={next_state[1]:.3f}, Neighbors={next_state[2]}]")  # CHANGED SNR to SINR
                     
+                    # CHECK FOR MODEL SAVING - this was missing!
+                    vehicle.maybe_save_models()
+                    
                 logger.info(f" VEHICLE {vehicle_id} PROCESSING COMPLETE")
                     
             except Exception as e:
@@ -1367,10 +1455,20 @@ class UltraExplorativeDecentralizedRLServer:
                     'timestamp': vehicle_data.get('timestamp', time.time())
                 }
         
+        # SAVE SHARED MODELS PERIODICALLY
+        if self.training_mode and self.global_episode_count % MODEL_SAVE_INTERVAL == 0:
+            logger.info(f" SAVING SHARED MODELS at episode {self.global_episode_count}")
+            SharedModelManager.save_models(
+                self.shared_feature_extractor,
+                self.shared_agent,
+                episode=self.global_episode_count
+            )
+        
         logger.info(f"\n{'='*80}")
         logger.info(f" BATCH PROCESSING SUMMARY")
         logger.info(f" Successfully processed: {sum(1 for v in batch_response['vehicles'].values() if v.get('status') != 'error')} vehicles")
         logger.info(f" Failed to process: {sum(1 for v in batch_response['vehicles'].values() if v.get('status') == 'error')} vehicles")
+        logger.info(f" Current episode: {self.global_episode_count}")
         
         return batch_response
 
@@ -1412,15 +1510,34 @@ class UltraExplorativeDecentralizedRLServer:
     
     def stop(self):
         """Stop the server and save shared models"""
+        logger.info(" STOPPING SERVER - SAVING FINAL MODELS")
         self.running = False
-        self.server.close()
+        
+        try:
+            self.server.close()
+        except:
+            pass
         
         if self.training_mode:
-            SharedModelManager.save_models(
+            logger.info(f" SAVING SHARED MODELS at final episode {self.global_episode_count}")
+            success = SharedModelManager.save_models(
                 self.shared_feature_extractor,
                 self.shared_agent,
                 episode=self.global_episode_count
             )
+            if success:
+                logger.info(" SHARED MODELS SAVED SUCCESSFULLY")
+            else:
+                logger.error(" FAILED TO SAVE SHARED MODELS")
+                
+            # Also save individual vehicle models
+            for vehicle_id, vehicle in self.vehicle_nodes.items():
+                try:
+                    vehicle.save_models(episode=self.global_episode_count)
+                    logger.info(f" SAVED MODELS FOR VEHICLE {vehicle_id}")
+                except Exception as e:
+                    logger.error(f" FAILED TO SAVE MODELS FOR VEHICLE {vehicle_id}: {e}")
+                    
         log_message(" ULTRA-EXPLORATIVE SINGLE AGENT Server stopped")
 
 # Legacy wrapper for compatibility
