@@ -1,4 +1,4 @@
-# Ultra-Explorative Single Agent SAC for VANET Optimization
+# Single Agent SAC for VANET Optimization
 
 An advanced single-agent reinforcement learning system using Soft Actor-Critic (SAC) with ultra-aggressive exploration for comprehensive VANET (Vehicular Ad-hoc Network) parameter optimization. The system uses a unified agent to simultaneously control transmission power, beacon rates, and modulation coding schemes with maximum exploration coverage of the parameter space.
 
