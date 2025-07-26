@@ -142,6 +142,297 @@ def safe_normalize_state(state: torch.Tensor, mean: torch.Tensor, std: torch.Ten
     except Exception as e:
         logger.error(f"Normalization failed: {e}")
         return state
+    
+    
+class PerformanceTracker:
+    """Track only essential algorithm performance metrics for Excel export"""
+    def __init__(self, log_dir):
+        self.log_dir = log_dir
+        os.makedirs(log_dir, exist_ok=True)
+        
+        # Performance summary data (what goes to Excel)
+        self.performance_data = {
+            'episode': [],
+            'timestamp': [],
+            'avg_reward': [],
+            'actor_loss': [],
+            'critic_loss': [],
+            'exploration_factor': [],
+            'success_rate': [],
+            'active_vehicles': [],
+            'buffer_size': []
+        }
+        
+        # Temporary tracking for calculations
+        self.episode_rewards = []
+        self.recent_losses = {'actor': [], 'critic': []}
+        self.batch_success_count = 0
+        self.batch_total_count = 0
+        
+    def update_training_metrics(self, actor_loss, critic1_loss, critic2_loss, exploration_factor, buffer_size):
+        """Update training metrics (called during agent updates)"""
+        avg_critic_loss = (critic1_loss + critic2_loss) / 2
+        
+        self.recent_losses['actor'].append(actor_loss)
+        self.recent_losses['critic'].append(avg_critic_loss)
+        
+        # Keep only last 50 losses for moving average
+        if len(self.recent_losses['actor']) > 50:
+            self.recent_losses['actor'].pop(0)
+            self.recent_losses['critic'].pop(0)
+    
+    def update_episode_metrics(self, episode, reward, active_vehicles, batch_success, batch_total):
+        """Update episode-level metrics (called at episode end)"""
+        self.episode_rewards.append(reward)
+        self.batch_success_count += batch_success
+        self.batch_total_count += batch_total
+        
+        # Calculate performance summary every 10 episodes
+        if episode % 10 == 0:
+            self._save_performance_summary(episode, active_vehicles)
+    
+    def _save_performance_summary(self, episode, active_vehicles):
+        """Save performance summary to Excel-ready format"""
+        # Calculate averages
+        avg_reward = np.mean(self.episode_rewards[-10:]) if self.episode_rewards else 0
+        avg_actor_loss = np.mean(self.recent_losses['actor'][-10:]) if self.recent_losses['actor'] else 0
+        avg_critic_loss = np.mean(self.recent_losses['critic'][-10:]) if self.recent_losses['critic'] else 0
+        success_rate = (self.batch_success_count / max(self.batch_total_count, 1)) * 100
+        
+        # Get current exploration factor (from any active vehicle)
+        exploration_factor = 1.0  # Default, will be updated by caller
+        buffer_size = 0  # Default, will be updated by caller
+        
+        # Add to performance data
+        self.performance_data['episode'].append(episode)
+        self.performance_data['timestamp'].append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        self.performance_data['avg_reward'].append(round(avg_reward, 4))
+        self.performance_data['actor_loss'].append(round(avg_actor_loss, 6))
+        self.performance_data['critic_loss'].append(round(avg_critic_loss, 6))
+        self.performance_data['exploration_factor'].append(round(exploration_factor, 4))
+        self.performance_data['success_rate'].append(round(success_rate, 2))
+        self.performance_data['active_vehicles'].append(active_vehicles)
+        self.performance_data['buffer_size'].append(buffer_size)
+        
+        # Reset batch counters
+        self.batch_success_count = 0
+        self.batch_total_count = 0
+        
+        # Save to CSV (Excel-compatible)
+        self._export_to_csv()
+    
+    def _export_to_csv(self):
+        """Export performance summary to CSV and Excel with Summary Sheet"""
+        try:
+            df = pd.DataFrame(self.performance_data)
+            csv_path = f"{self.log_dir}/rl_performance_summary.csv"
+            df.to_csv(csv_path, index=False)
+            
+            # Create Excel file with multiple sheets
+            excel_path = f"{self.log_dir}/rl_performance_summary.xlsx"
+            with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+                # Raw data sheet
+                df.to_excel(writer, sheet_name='Raw_Data', index=False)
+                
+                # Summary sheet with algorithm performance analysis
+                summary_df = self._create_summary_sheet(df)
+                summary_df.to_excel(writer, sheet_name='Algorithm_Summary', index=False)
+                
+                # Trends sheet with recent performance
+                trends_df = self._create_trends_sheet(df)
+                trends_df.to_excel(writer, sheet_name='Recent_Trends', index=False)
+            
+        except Exception as e:
+            log_message(f"Failed to export performance data: {e}", "ERROR")
+    
+    def _create_summary_sheet(self, df):
+        """Create algorithm performance summary sheet"""
+        if df.empty:
+            return pd.DataFrame()
+        
+        # Calculate key performance indicators
+        summary_data = {
+            'Metric': [
+                'Training Status',
+                'Total Episodes',
+                'Training Duration (Episodes)',
+                '',
+                '=== REWARD PERFORMANCE ===',
+                'Latest Average Reward',
+                'Best Average Reward',
+                'Worst Average Reward',
+                'Reward Improvement (%)',
+                'Reward Trend (Last 5 Episodes)',
+                '',
+                '=== LEARNING PERFORMANCE ===',
+                'Latest Actor Loss',
+                'Latest Critic Loss',
+                'Best Actor Loss',
+                'Best Critic Loss',
+                'Loss Trend (Last 5 Episodes)',
+                '',
+                '=== EXPLORATION STATUS ===',
+                'Current Exploration Factor',
+                'Exploration Decay Progress (%)',
+                'Exploration Remaining',
+                '',
+                '=== SYSTEM PERFORMANCE ===',
+                'Current Success Rate (%)',
+                'Average Success Rate (%)',
+                'Active Vehicles',
+                'Max Buffer Size Reached',
+                'Training Efficiency',
+                '',
+                '=== CONVERGENCE ANALYSIS ===',
+                'Reward Stability (StdDev)',
+                'Loss Stability (StdDev)',
+                'Learning Progress Score',
+                'Convergence Status'
+            ],
+            'Value': []
+        }
+        
+        # Calculate values
+        latest_reward = df['avg_reward'].iloc[-1] if not df.empty else 0
+        best_reward = df['avg_reward'].max() if not df.empty else 0
+        worst_reward = df['avg_reward'].min() if not df.empty else 0
+        
+        latest_actor_loss = df['actor_loss'].iloc[-1] if not df.empty else 0
+        latest_critic_loss = df['critic_loss'].iloc[-1] if not df.empty else 0
+        best_actor_loss = df['actor_loss'].min() if not df.empty else 0
+        best_critic_loss = df['critic_loss'].min() if not df.empty else 0
+        
+        latest_exploration = df['exploration_factor'].iloc[-1] if not df.empty else 1.0
+        exploration_progress = ((1.0 - latest_exploration) / (1.0 - 0.3)) * 100  # Using 0.3 as MIN_EXPLORATION
+        
+        success_rate = df['success_rate'].iloc[-1] if not df.empty else 0
+        avg_success_rate = df['success_rate'].mean() if not df.empty else 0
+        
+        active_vehicles = df['active_vehicles'].iloc[-1] if not df.empty else 0
+        max_buffer = df['buffer_size'].max() if not df.empty else 0
+        
+        # Calculate trends and improvements
+        if len(df) >= 2:
+            reward_improvement = ((latest_reward - df['avg_reward'].iloc[0]) / abs(df['avg_reward'].iloc[0]) * 100) if df['avg_reward'].iloc[0] != 0 else 0
+            
+            # Recent trends (last 5 episodes)
+            recent_rewards = df['avg_reward'].tail(5)
+            recent_losses = df['actor_loss'].tail(5)
+            
+            reward_trend = "↗ Improving" if recent_rewards.is_monotonic_increasing else "↘ Declining" if recent_rewards.is_monotonic_decreasing else "→ Stable"
+            loss_trend = "↗ Improving" if recent_losses.is_monotonic_decreasing else "↘ Worsening" if recent_losses.is_monotonic_increasing else "→ Stable"
+            
+            # Stability analysis
+            reward_stability = df['avg_reward'].std()
+            loss_stability = df['actor_loss'].std()
+            
+            # Learning progress score (0-100)
+            reward_score = min(100, max(0, (latest_reward / max(best_reward, 0.1)) * 50))
+            loss_score = min(100, max(0, (1 - (latest_actor_loss / max(df['actor_loss'].max(), 0.1))) * 30))
+            exploration_score = min(100, max(0, exploration_progress * 0.2))
+            learning_score = reward_score + loss_score + exploration_score
+            
+            # Convergence status
+            if learning_score > 80:
+                convergence_status = " Well Converged"
+            elif learning_score > 60:
+                convergence_status = " Converging"
+            elif learning_score > 40:
+                convergence_status = " Early Training"
+            else:
+                convergence_status = " Training Started"
+                
+        else:
+            reward_improvement = 0
+            reward_trend = "N/A"
+            loss_trend = "N/A"
+            reward_stability = 0
+            loss_stability = 0
+            learning_score = 0
+            convergence_status = " Insufficient Data"
+        
+        # Training efficiency
+        training_efficiency = f"{latest_reward:.3f} reward/episode" if latest_reward > 0 else "Starting"
+        
+        # Fill values
+        values = [
+            " Active" if len(df) > 0 else " Inactive",
+            len(df) * 10,  # Since we save every 10 episodes
+            f"{df['episode'].iloc[-1] - df['episode'].iloc[0] if len(df) > 1 else df['episode'].iloc[-1] if len(df) > 0 else 0} episodes",
+            '',
+            '',
+            f"{latest_reward:.4f}",
+            f"{best_reward:.4f}",
+            f"{worst_reward:.4f}",
+            f"{reward_improvement:.2f}%",
+            reward_trend,
+            '',
+            '',
+            f"{latest_actor_loss:.6f}",
+            f"{latest_critic_loss:.6f}",
+            f"{best_actor_loss:.6f}",
+            f"{best_critic_loss:.6f}",
+            loss_trend,
+            '',
+            '',
+            f"{latest_exploration:.4f}",
+            f"{exploration_progress:.1f}%",
+            f"{1.0 - latest_exploration:.4f}",
+            '',
+            '',
+            f"{success_rate:.1f}%",
+            f"{avg_success_rate:.1f}%",
+            f"{active_vehicles} vehicles",
+            f"{max_buffer:,} experiences",
+            training_efficiency,
+            '',
+            '',
+            f"{reward_stability:.4f}",
+            f"{loss_stability:.6f}",
+            f"{learning_score:.1f}/100",
+            convergence_status
+        ]
+        
+        summary_data['Value'] = values
+        return pd.DataFrame(summary_data)
+    
+    def _create_trends_sheet(self, df):
+        """Create recent trends analysis sheet"""
+        if df.empty or len(df) < 5:
+            return pd.DataFrame({'Message': ['Insufficient data for trend analysis. Need at least 5 data points.']})
+        
+        # Get last 10 episodes for trend analysis
+        recent_df = df.tail(10).copy()
+        
+        # Calculate episode-to-episode changes
+        recent_df['reward_change'] = recent_df['avg_reward'].pct_change() * 100
+        recent_df['actor_loss_change'] = recent_df['actor_loss'].pct_change() * 100
+        recent_df['exploration_change'] = recent_df['exploration_factor'].diff()
+        
+        # Create trends summary
+        trends_data = {
+            'Episode': recent_df['episode'].tolist(),
+            'Avg_Reward': recent_df['avg_reward'].round(4).tolist(),
+            'Reward_Change_%': recent_df['reward_change'].round(2).tolist(),
+            'Actor_Loss': recent_df['actor_loss'].round(6).tolist(),
+            'Loss_Change_%': recent_df['actor_loss_change'].round(2).tolist(),
+            'Exploration': recent_df['exploration_factor'].round(4).tolist(),
+            'Exploration_Change': recent_df['exploration_change'].round(4).tolist(),
+            'Success_Rate_%': recent_df['success_rate'].round(1).tolist(),
+            'Buffer_Size': recent_df['buffer_size'].tolist()
+        }
+        
+        trends_df = pd.DataFrame(trends_data)
+        
+        # Add trend indicators
+        trends_df['Reward_Trend'] = trends_df['Reward_Change_%'].apply(
+            lambda x: '↗' if x > 1 else '↘' if x < -1 else '→' if pd.notna(x) else ''
+        )
+        trends_df['Loss_Trend'] = trends_df['Loss_Change_%'].apply(
+            lambda x: '↗' if x < -1 else '↘' if x > 1 else '→' if pd.notna(x) else ''
+        )
+        
+        return trends_df
 
 # ==============================
 # Prioritized Replay Buffer Implementation
@@ -733,123 +1024,64 @@ class UltraExplorativeSingleAgent:
 # Enhanced Vehicle Node Implementation
 # ==============================
 class UltraExplorativeVehicleNode:
-    def __init__(self, node_id, feature_extractor, agent, training_mode=True):
+    def __init__(self, node_id, feature_extractor, agent, training_mode=True, performance_tracker=None):
         self.node_id = node_id
         self.training_mode = training_mode
         self.feature_extractor = feature_extractor
         self.agent = agent
+        self.performance_tracker = performance_tracker
         
-        # Initialize parameters from incoming data (not hardcoded)
+        # Parameters
         self.current_power = None
         self.current_beacon_rate = None
         self.current_mcs = None
         
-        # Enhanced performance tracking
-        os.makedirs(LOG_DIR, exist_ok=True)
-        self.writer = SummaryWriter(f"{LOG_DIR}/vehicle_{node_id}")
+        # Minimal tracking for performance calculation
         self.episode_count = 0
-        self.last_save_episode = 0
-        self.debug_mode = True  # Enable for exploration monitoring
         self.train_counter = 0
-        self.train_interval = 3  # More frequent training
+        self.train_interval = 3
+        self.episode_reward = 0.0
         
-        # Action diversity tracking
-        self.action_history = {
-            'power_deltas': deque(maxlen=200),
-            'beacon_deltas': deque(maxlen=200),
-            'mcs_deltas': deque(maxlen=200)
-        }
+        # TensorBoard (optional, lightweight)
+        if training_mode:
+            self.writer = SummaryWriter(f"{LOG_DIR}/vehicle_{node_id}")
+        else:
+            self.writer = None
 
     def get_actions(self, state, current_params):
-        """Get actions with dual agent consistency improvements"""
+        """Get actions - no detailed logging"""
         try:
-            logger.info(f"  STARTING ACTION SELECTION FOR {self.node_id}")
-            logger.info(f"  Input State: CBR={state[0]:.6f}, SINR={state[1]:.3f}, Neighbors={state[2]}")  # CHANGED SNR to SINR
-            logger.info(f"  Current Parameters: Power={current_params.get('transmissionPower', 20):.1f}dBm, Beacon={current_params.get('beaconRate', 10):.2f}Hz, MCS={current_params.get('MCS', 0)}")
-            
-            # Retrieve current values with safe defaults
             self.current_power = float(current_params.get('transmissionPower', 20))
             self.current_beacon_rate = float(current_params.get('beaconRate', 10))
             self.current_mcs = int(current_params.get('MCS', 0))
     
-            logger.info(f"  Updated Internal State: Power={self.current_power:.1f}, Beacon={self.current_beacon_rate:.2f}, MCS={self.current_mcs}")
-    
-            # Convert state to tensor with proper shape
             state_tensor = safe_tensor_conversion(np.array(state, dtype=np.float32))
             if state_tensor.dim() == 1:
                 state_tensor = state_tensor.unsqueeze(0)
                 
-            logger.info(f"  State tensor prepared: shape={state_tensor.shape}, values={state_tensor.flatten().tolist()}")
-                
-            if self.debug_mode:
-                logger.info(f"  AGENT EXPLORATION STATUS:")
-                logger.info(f"   Current Exploration Factor: {self.agent.exploration_factor:.6f}")
-                logger.info(f"   Action History Length: {len(self.agent.recent_actions)}")
-    
-            # Inference from agent
             with torch.no_grad():
                 features = self.feature_extractor(state_tensor)
-                
-                logger.info(f"  Features extracted: shape={features.shape}")
-    
-                # Get all actions from single agent
                 actions, log_prob = self.agent.select_action(features)
                 
-                logger.info(f"  RAW ACTIONS GENERATED:")
-                logger.info(f"   Raw Actions: {actions.flatten().tolist()}")
-                logger.info(f"   Log Probability: {log_prob.item():.6f}")
-                
-                # Check for NaN immediately
                 if torch.isnan(actions).any():
-                    logger.warning(f"⚠️  NaN detected in actions: {actions}")
                     actions = torch.zeros_like(actions)
     
-                # Get action values
-                power_delta = actions[0, 0].item()
-                beacon_delta = actions[0, 1].item()
-                mcs_delta = actions[0, 2].item()
+                power_delta = max(-15.0, min(15.0, actions[0, 0].item()))
+                beacon_delta = max(-10.0, min(10.0, actions[0, 1].item()))
+                mcs_delta = max(-7.5, min(7.5, actions[0, 2].item()))
                 
                 # NaN protection
-                if math.isnan(power_delta):
-                    logger.warning(f"   NaN detected in power_delta, replacing with 0")
-                    power_delta = 0.0
-                if math.isnan(beacon_delta):
-                    logger.warning(f"   NaN detected in beacon_delta, replacing with 0")
-                    beacon_delta = 0.0
-                if math.isnan(mcs_delta):
-                    logger.warning(f"   NaN detected in mcs_delta, replacing with 0")
-                    mcs_delta = 0.0
+                if math.isnan(power_delta): power_delta = 0.0
+                if math.isnan(beacon_delta): beacon_delta = 0.0
+                if math.isnan(mcs_delta): mcs_delta = 0.0
                 
-                # Clamp deltas to reasonable bounds (align with dual agent)
-                power_delta = max(-15.0, min(15.0, power_delta))  # Match dual agent bounds
-                beacon_delta = max(-10.0, min(10.0, beacon_delta))  # Match dual agent bounds
-                mcs_delta = max(-7.5, min(7.5, mcs_delta))  # Match dual agent bounds
-                
-                logger.info(f"  FINAL ACTION DELTAS:")
-                logger.info(f"   Power Delta: {power_delta:.6f}")
-                logger.info(f"   Beacon Delta: {beacon_delta:.6f}")
-                logger.info(f"   MCS Delta: {mcs_delta:.6f}")
-                
-                # Track action diversity
-                self.action_history['power_deltas'].append(power_delta)
-                self.action_history['beacon_deltas'].append(beacon_delta)
-                self.action_history['mcs_deltas'].append(mcs_delta)
-                
-                # Calculate new parameters with clamping
                 new_power = max(POWER_MIN, min(POWER_MAX, self.current_power + power_delta))
                 new_beacon = max(BEACON_RATE_MIN, min(BEACON_RATE_MAX, 
                                     self.current_beacon_rate + beacon_delta))
-                
-                # Ensure mcs_delta is finite before rounding and converting
                 mcs_delta_rounded = round(mcs_delta) if math.isfinite(mcs_delta) else 0
                 new_mcs = max(MCS_MIN, min(MCS_MAX, self.current_mcs + mcs_delta_rounded))
-                
-                logger.info(f"   PARAMETER ADJUSTMENT CALCULATION:")
-                logger.info(f"   Old Power: {self.current_power:.1f} dBm → New Power: {new_power:.1f} dBm (Δ={new_power-self.current_power:.1f})")
-                logger.info(f"   Old Beacon: {self.current_beacon_rate:.2f} Hz → New Beacon: {new_beacon:.2f} Hz (Δ={new_beacon-self.current_beacon_rate:.2f})")
-                logger.info(f"   Old MCS: {self.current_mcs} → New MCS: {new_mcs} (Δ={new_mcs-self.current_mcs})")
     
-            result = {
+            return {
                 'power_delta': float(power_delta),
                 'beacon_delta': float(beacon_delta),
                 'mcs_delta': int(mcs_delta_rounded),
@@ -859,18 +1091,9 @@ class UltraExplorativeVehicleNode:
                 'new_mcs': int(new_mcs),
                 'exploration_factor': self.agent.exploration_factor
             }
-            
-            logger.info(f"  ACTION SELECTION COMPLETE FOR {self.node_id}:")
-            logger.info(f"   Power Delta: {result['power_delta']:.6f} → New Power: {result['new_power']:.1f}dBm")
-            logger.info(f"   Beacon Delta: {result['beacon_delta']:.6f} → New Beacon: {result['new_beacon_rate']:.2f}Hz") 
-            logger.info(f"   MCS Delta: {result['mcs_delta']} → New MCS: {result['new_mcs']}")
-            logger.info(f"   Exploration Factor: {result['exploration_factor']:.6f}")
-            
-            return result
     
         except Exception as e:
-            logger.error(f"  Action selection failed for {self.node_id}: {str(e)}")
-            logger.error(f"  Full traceback: {traceback.format_exc()}")
+            log_message(f"Action selection failed for {self.node_id}: {str(e)}", "ERROR")
             raise RuntimeError(f"Action selection failed: {str(e)}")
 
     def _calculate_action_diversity(self):
@@ -916,73 +1139,61 @@ class UltraExplorativeVehicleNode:
             raise RuntimeError(f"Action application failed: {str(e)}")
 
     def store_experience(self, state, action, reward, next_state, done):
-        """Store experience in the replay buffer"""
+        """Store experience with minimal tracking"""
         try:
-            # Convert to tensors with proper dimensions
+            # Add reward to episode total
+            self.episode_reward += reward
+            
+            # Convert to tensors
             state_tensor = safe_tensor_conversion(state)
             if state_tensor.dim() == 1:
-                state_tensor = state_tensor.unsqueeze(0)  # Add batch dimension
+                state_tensor = state_tensor.unsqueeze(0)
                 
             next_state_tensor = safe_tensor_conversion(next_state)
             if next_state_tensor.dim() == 1:
                 next_state_tensor = next_state_tensor.unsqueeze(0)
                 
-            # Ensure action has proper dimensions
             if not isinstance(action, torch.Tensor):
                 action = safe_tensor_conversion(action)
             if action.dim() == 1:
-                action = action.unsqueeze(0)  # Add batch dimension
+                action = action.unsqueeze(0)
                 
             reward_tensor = torch.FloatTensor([reward])
             done_tensor = torch.FloatTensor([float(done)])
             
-            # Create the experience tuple
             experience = (state_tensor, action, reward_tensor, next_state_tensor, done_tensor)
             self.agent.replay_buffer.add(experience)
             
-            logger.info(f"  EXPERIENCE STORED FOR {self.node_id}:")
-            logger.info(f"   Replay buffer size: {len(self.agent.replay_buffer)}")
-            logger.info(f"   Reward: {reward:.6f}")
-            
-            # Enhanced training frequency for faster exploration learning
+            # Training
             if (len(self.agent.replay_buffer) >= BATCH_SIZE and 
                 self.train_counter % self.train_interval == 0):
-                logger.info(f"🎓 TRIGGERING AGENT TRAINING FOR {self.node_id}")
                 self.update_agent()
                 
-            # ADDED: Save models more frequently during training
-            if (self.training_mode and 
-                len(self.agent.replay_buffer) >= BATCH_SIZE and
-                self.train_counter % 50 == 0):  # Save every 50 training steps
-                logger.info(f"💾 SAVING MODELS FOR {self.node_id} at training step {self.train_counter}")
-                self.save_models()
+            # Episode end tracking
+            if done and self.performance_tracker:
+                self.performance_tracker.episode_rewards.append(self.episode_reward)
+                self.episode_reward = 0.0
                 
         except Exception as e:
             log_message(f"Error storing experience: {str(e)}", "ERROR")
 
+
     def update_agent(self):
-        """Enhanced agent update with prioritized experience replay"""
+        """Agent update with minimal performance tracking"""
         if len(self.agent.replay_buffer) < BATCH_SIZE:
             return
             
         try:
-            logger.info(f" STARTING AGENT UPDATE FOR {self.node_id}")
-            
-            # Sample batch with priorities
             batch, weights, indices = self.agent.replay_buffer.sample(BATCH_SIZE)
             states, actions, rewards, next_states, dones = batch
             
-            # Normalize rewards
             rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
             
             with torch.no_grad():
                 features = self.feature_extractor(states)
                 next_features = self.feature_extractor(next_states)
-                
-                # Sample next actions
                 next_actions, next_log_probs = self.agent.actor.sample(next_features)
                 
-                # Target Q values
                 target_q1 = self.agent.target_critic1(next_features, next_actions)
                 target_q2 = self.agent.target_critic2(next_features, next_actions)
                 target_q = torch.min(target_q1, target_q2) - self.agent.log_alpha.exp() * next_log_probs.unsqueeze(-1)
@@ -992,22 +1203,19 @@ class UltraExplorativeVehicleNode:
             current_q1 = self.agent.critic1(features, actions)
             current_q2 = self.agent.critic2(features, actions)
             
-            # Weighted losses for prioritized replay
             td_errors1 = current_q1 - target_q
             td_errors2 = current_q2 - target_q
             critic1_loss = (td_errors1.pow(2) * weights.unsqueeze(-1)).mean()
             critic2_loss = (td_errors2.pow(2) * weights.unsqueeze(-1)).mean()
             
-            # FIXED: Update priorities with proper shape handling
+            # Update priorities
             td_errors = torch.min(td_errors1.abs(), td_errors2.abs()).squeeze(-1).detach()
-            # Ensure td_errors is 1D and convert to numpy
             if td_errors.dim() > 1:
                 td_errors = td_errors.flatten()
-            priorities_np = td_errors.cpu().numpy()
-            # Ensure priorities are finite and positive
-            priorities_np = np.clip(priorities_np, 1e-6, 1e6)
+            priorities_np = np.clip(td_errors.cpu().numpy(), 1e-6, 1e6)
             self.agent.replay_buffer.update_priorities(indices, priorities_np)
             
+            # Critic updates
             self.agent.critic1_optim.zero_grad()
             critic1_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.agent.critic1.parameters(), 1.0)
@@ -1026,7 +1234,6 @@ class UltraExplorativeVehicleNode:
             
             actor_loss = (self.agent.log_alpha.exp().detach() * log_probs - q).mean()
             
-            # Enhanced entropy adjustment
             alpha_loss = -(self.agent.log_alpha * (log_probs.detach() + self.agent.target_entropy)).mean()
             
             self.agent.actor_optim.zero_grad()
@@ -1049,20 +1256,18 @@ class UltraExplorativeVehicleNode:
             
             self.train_counter += 1
             
-            logger.info(f"  AGENT UPDATE COMPLETE FOR {self.node_id}")
-            logger.info(f"   Actor Loss: {actor_loss.item():.6f}")
-            logger.info(f"   Critic1 Loss: {critic1_loss.item():.6f}")
-            logger.info(f"   Critic2 Loss: {critic2_loss.item():.6f}")
-            logger.info(f"   Alpha: {self.agent.log_alpha.exp().item():.6f}")
-            
-            # Enhanced logging every 25 updates
-            if self.train_counter % 25 == 0:
-                self._log_exploration_metrics()
+            # Update performance tracker (for Excel export)
+            if self.performance_tracker:
+                self.performance_tracker.update_training_metrics(
+                    actor_loss.item(),
+                    critic1_loss.item(),
+                    critic2_loss.item(),
+                    self.agent.exploration_factor,
+                    len(self.agent.replay_buffer)
+                )
                 
         except Exception as e:
             log_message(f"Error updating agent: {str(e)}", "ERROR")
-            # Log full traceback for debugging
-            logger.error(f"Full traceback: {traceback.format_exc()}")
 
     def _log_exploration_metrics(self):
         """Log enhanced exploration metrics"""
@@ -1201,35 +1406,21 @@ class UltraExplorativeDecentralizedRLServer:
         
         self.global_episode_count = 0
         
-        # Initialize ULTRA-EXPLORATIVE shared models
+        # Performance tracker for Excel export
+        self.performance_tracker = PerformanceTracker(LOG_DIR) if training_mode else None
+        
+        # Initialize shared models
         self.shared_feature_extractor = ExploratorySharedFeatureExtractor(state_dim=3)
         self.shared_agent = UltraExplorativeSingleAgent(self.shared_feature_extractor)
         
         # Load models if available
-        if not training_mode:  # Production mode - load trained models
-            log_message("PRODUCTION MODE: Attempting to load latest trained model...")
+        if not training_mode:
             success = SharedModelManager.load_latest_models(
-                self.shared_feature_extractor,
-                self.shared_agent
+                self.shared_feature_extractor, self.shared_agent
             )
-            if success:
-                log_message("SUCCESS: Production mode loaded pre-trained models!")
-            else:
-                log_message("WARNING: No trained models found for production mode!", "WARNING")
-                log_message("Starting with randomly initialized networks", "WARNING")
-        else:  # Training mode - start fresh
-            log_message("TRAINING MODE: Starting with fresh neural networks")
-        log_message(f"  ULTRA-EXPLORATIVE SINGLE AGENT Server listening on {self.host}:{self.port}")
-        log_message(f"Starting in {'TRAINING' if training_mode else 'PRODUCTION'} mode")
-        log_message(f"  Exploration settings:")
-        log_message(f"  - Initial exploration factor: {INITIAL_EXPLORATION_FACTOR}")
-        log_message(f"  - Power action bounds: ±{POWER_ACTION_BOUND}")
-        log_message(f"  - Beacon action bounds: ±{BEACON_ACTION_BOUND}")
-        log_message(f"  - MCS action bounds: ±{MCS_ACTION_BOUND}")
-        log_message(f"  - CALCULATED MAX EXPLORATION RANGES:")
-        log_message(f"    * Power: ±{POWER_ACTION_BOUND * INITIAL_EXPLORATION_FACTOR:.1f} dBm (system needs ±29)")
-        log_message(f"    * Beacon: ±{BEACON_ACTION_BOUND * INITIAL_EXPLORATION_FACTOR:.1f} Hz (system needs ±19)")
-        log_message(f"    * MCS: ±{MCS_ACTION_BOUND * INITIAL_EXPLORATION_FACTOR:.1f} levels (system needs ±10)")
+            log_message(f"Production mode: {'Loaded models' if success else 'Random init'}")
+        
+        log_message(f"Server listening on {self.host}:{self.port}")
 
     def start(self):
         try:
@@ -1325,110 +1516,57 @@ class UltraExplorativeDecentralizedRLServer:
             log_message(f"Connection closed. Duration: {duration:.2f}s", "INFO")
         
     def _process_batch(self, batch_data, addr):
-        """Process a batch of vehicle data with SINR consistency"""
+        """Process batch with Excel performance tracking"""
         batch_response = {"vehicles": {}, "timestamp": time.time()}
         
-        logger.info(f"  PROCESSING SINGLE AGENT BATCH from {addr}")
-        logger.info(f"  Total vehicles in batch: {len(batch_data)}")
-        logger.info(f"  Vehicle IDs: {list(batch_data.keys())}")
-        
-        # INCREMENT EPISODE COUNT - this was missing!
         self.global_episode_count += 1
+        successful_vehicles = 0
+        failed_vehicles = 0
         
         for vehicle_id, vehicle_data in batch_data.items():
             try:
-                logger.info(f"\n{'='*60}")
-                logger.info(f"  PROCESSING VEHICLE {vehicle_id}")
-                logger.info(f"{'='*60}")
-                
-                # CRITICAL FIX: Use SINR instead of SNR (align with dual agent)
-                logger.info(f"  RECEIVED FROM SIMULATION:")
-                logger.info(f"   CBR: {vehicle_data.get('CBR', 0):.6f}")
-                logger.info(f"   SINR: {vehicle_data.get('SINR', 0):.3f} dB")  # CHANGED from SNR to SINR
-                logger.info(f"   Neighbors: {vehicle_data.get('neighbors', 0)}")
-                logger.info(f"   Current Power: {vehicle_data.get('transmissionPower', 20):.1f} dBm")
-                logger.info(f"   Current Beacon: {vehicle_data.get('beaconRate', 10):.2f} Hz")
-                logger.info(f"   Current MCS: {vehicle_data.get('MCS', 0)}")
-    
-                # Get current state - CRITICAL FIX: Use SINR field
+                # Process vehicle (minimal logging)
                 state = [
                     float(vehicle_data.get('CBR', 0)),
-                    float(vehicle_data.get('SINR', 0)),      # CHANGED from 'SNR' to 'SINR'
+                    float(vehicle_data.get('SINR', 0)),
                     float(vehicle_data.get('neighbors', 0))
                 ]
                 
-                # Get current parameters
                 current_params = {
                     'transmissionPower': float(vehicle_data.get('transmissionPower', 20)),
                     'beaconRate': float(vehicle_data.get('beaconRate', 10)),
                     'MCS': int(vehicle_data.get('MCS', 0))
                 }
                 
-                logger.info(f"  RL STATE PROCESSING:")
-                logger.info(f"  State: CBR={state[0]:.3f}, SINR={state[1]:.1f}dB, Neighbors={int(state[2])}")  # CHANGED SNR to SINR
-                
                 # Initialize vehicle if new
                 if vehicle_id not in self.vehicle_nodes:
                     self.vehicle_nodes[vehicle_id] = UltraExplorativeVehicleNode(
                         vehicle_id, self.shared_feature_extractor,
-                        self.shared_agent, self.training_mode
+                        self.shared_agent, self.training_mode,
+                        self.performance_tracker
                     )
-                    logger.info(f"  CREATED NEW SINGLE AGENT vehicle node {vehicle_id}")
-                    logger.info(f"   Initial Exploration Factor: {self.vehicle_nodes[vehicle_id].agent.exploration_factor:.4f}")
     
-                # Get actions from RL
                 vehicle = self.vehicle_nodes[vehicle_id]
-                
-                # UPDATE EPISODE COUNT FOR VEHICLE - this was also missing!
                 vehicle.episode_count = self.global_episode_count
-                
-                logger.info(f"  RL AGENT PROCESSING:")
-                logger.info(f"   Current Exploration Factor: {vehicle.agent.exploration_factor:.6f}")
                 
                 actions = vehicle.get_actions(state, current_params)
                 new_params = vehicle.apply_actions(actions)
                 
-                logger.info(f"  RL SINGLE AGENT ACTIONS GENERATED:")
-                logger.info(f"   Power Delta: {actions['power_delta']:.6f}")
-                logger.info(f"   Beacon Delta: {actions['beacon_delta']:.6f}")
-                logger.info(f"   MCS Delta: {actions['mcs_delta']}")
-                
-                logger.info(f"   PARAMETER ADJUSTMENT CALCULATION:")
-                logger.info(f"   Old Power: {current_params['transmissionPower']:.1f} dBm → New Power: {new_params['power']:.1f} dBm")
-                logger.info(f"   Old Beacon: {current_params['beaconRate']:.2f} Hz → New Beacon: {new_params['beacon_rate']:.2f} Hz")
-                logger.info(f"   Old MCS: {current_params['MCS']} → New MCS: {new_params['mcs']}")
-                
-                # Prepare response
-                response_data = {
+                # Response
+                batch_response["vehicles"][vehicle_id] = {
                     'transmissionPower': new_params['power'],
                     'beaconRate': new_params['beacon_rate'],
                     'MCS': new_params['mcs'],
                     'timestamp': vehicle_data.get('timestamp', time.time())
                 }
                 
-                batch_response["vehicles"][vehicle_id] = response_data
-                
-                logger.info(f"  SENDING TO SIMULATION:")
-                logger.info(f"   Transmission Power: {new_params['power']:.1f} dBm")
-                logger.info(f"   Beacon Rate: {new_params['beacon_rate']:.2f} Hz")
-                logger.info(f"   MCS: {new_params['mcs']}")
-                
-                # Enhanced training (align with dual agent approach)
+                # Training with performance tracking
                 if self.training_mode:
                     next_state = self._simulate_next_state(state)
                     reward = vehicle.agent.calculate_reward(
                         state[0], state[1], new_params['power'], 
                         new_params['mcs'], state[2])
                     
-                    batch_response["vehicles"][vehicle_id]['training'] = {
-                        'reward': float(reward),
-                        'exploration_factor': actions.get('exploration_factor', 1.0),
-                        'power_delta': actions['power_delta'],
-                        'beacon_delta': actions['beacon_delta'],
-                        'mcs_delta': actions['mcs_delta']
-                    }
-                    
-                    # Store experience
                     actions_tensor = torch.FloatTensor([
                         actions['power_delta'],
                         actions['beacon_delta'],
@@ -1436,41 +1574,37 @@ class UltraExplorativeDecentralizedRLServer:
                     ]).unsqueeze(0)
                     
                     vehicle.store_experience(state, actions_tensor, reward, next_state, False)
-                    
-                    logger.info(f"  TRAINING DATA:")
-                    logger.info(f"   Reward: {reward:.6f}")
-                    logger.info(f"   Next State: [CBR={next_state[0]:.6f}, SINR={next_state[1]:.3f}, Neighbors={next_state[2]}]")  # CHANGED SNR to SINR
-                    
-                    # CHECK FOR MODEL SAVING - this was missing!
-                    vehicle.maybe_save_models()
-                    
-                logger.info(f" VEHICLE {vehicle_id} PROCESSING COMPLETE")
+                
+                successful_vehicles += 1
                     
             except Exception as e:
-                error_msg = f"Error processing vehicle {vehicle_id}: {str(e)}"
-                logger.error(f" {error_msg}")
+                failed_vehicles += 1
                 batch_response["vehicles"][vehicle_id] = {
                     'status': 'error',
-                    'error': error_msg,
+                    'error': str(e),
                     'timestamp': vehicle_data.get('timestamp', time.time())
                 }
         
-        # SAVE SHARED MODELS PERIODICALLY
+        # Update performance tracker for Excel export
+        if self.training_mode and self.performance_tracker:
+            self.performance_tracker.update_episode_metrics(
+                self.global_episode_count,
+                0,  # Will be calculated from individual vehicle rewards
+                len(self.vehicle_nodes),
+                successful_vehicles,
+                successful_vehicles + failed_vehicles
+            )
+        
+        # Save shared models periodically
         if self.training_mode and self.global_episode_count % MODEL_SAVE_INTERVAL == 0:
-            logger.info(f" SAVING SHARED MODELS at episode {self.global_episode_count}")
             SharedModelManager.save_models(
                 self.shared_feature_extractor,
                 self.shared_agent,
                 episode=self.global_episode_count
             )
         
-        logger.info(f"\n{'='*80}")
-        logger.info(f" BATCH PROCESSING SUMMARY")
-        logger.info(f" Successfully processed: {sum(1 for v in batch_response['vehicles'].values() if v.get('status') != 'error')} vehicles")
-        logger.info(f" Failed to process: {sum(1 for v in batch_response['vehicles'].values() if v.get('status') == 'error')} vehicles")
-        logger.info(f" Current episode: {self.global_episode_count}")
-        
         return batch_response
+
 
     def _send_error_response(self, conn, error_msg):
         """Send error response to client"""
@@ -1550,7 +1684,7 @@ class DecentralizedRLServer(UltraExplorativeDecentralizedRLServer):
 # ==============================
 if __name__ == "__main__":
     # Set training_mode=False for production mode
-    rl_server = UltraExplorativeDecentralizedRLServer(HOST, PORT, training_mode=True)
+    rl_server = UltraExplorativeDecentralizedRLServer(HOST, PORT, training_mode=False)
     try:
         log_message(" Starting ULTRA-EXPLORATIVE SINGLE AGENT RL server...")
         log_message(f"Enhanced exploration settings:")
